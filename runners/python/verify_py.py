@@ -45,7 +45,23 @@ def main() -> int:
                 f"rsa_modulus_hygiene[{i}] {c['note']}: got ({accept},{reason}) "
                 f"want ({c['expect_accept']},{c['reason']})")
 
-    total = len(corpus.get("primality", [])) + len(corpus.get("rsa_modulus_hygiene", []))
+    batch = corpus.get("batch_common_factor", [])
+    if batch:
+        moduli = [int(c["n"]) for c in batch]
+        verdicts = oracle.batch_common_factor_verdicts(moduli)
+        for i, (c, got) in enumerate(zip(batch, verdicts)):
+            if got != c["shares_factor"]:
+                failures.append(f"batch_common_factor[{i}] {c['note']}: got shares={got} want {c['shares_factor']}")
+
+    for i, c in enumerate(corpus.get("ec_key_hygiene", [])):
+        valid, reason = oracle.ec_key_verdict(c["curve"], int(c["x"]), int(c["y"]))
+        if valid != c["expect_valid"] or reason != c["reason"]:
+            failures.append(
+                f"ec_key_hygiene[{i}] {c['note']}: got ({valid},{reason}) "
+                f"want ({c['expect_valid']},{c['reason']})")
+
+    total = sum(len(corpus.get(s, [])) for s in
+                ("primality", "rsa_modulus_hygiene", "batch_common_factor", "ec_key_hygiene"))
     if failures:
         print(f"FAIL: {len(failures)}/{total} cases diverged")
         for f in failures[:20]:

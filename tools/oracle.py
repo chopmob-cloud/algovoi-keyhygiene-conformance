@@ -278,3 +278,109 @@ def rsa_modulus_verdict(n: int, e: int) -> tuple[bool, str]:
     if e % 2 == 0 or e < 3:
         return (False, "public_exponent_invalid")
     return (True, "ok")
+
+
+# ---------------------------------------------------------------------------
+# batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a key set
+# ---------------------------------------------------------------------------
+
+def _gcd(a: int, b: int) -> int:
+    while b:
+        a, b = b, a % b
+    return a
+
+
+def batch_common_factor_verdicts(moduli: list[int]) -> list[bool]:
+    """For a SET of RSA moduli, per-key verdict = shares a prime with another key
+    in the set (a nontrivial common GCD). Keys that share a prime are trivially
+    factorable by anyone who holds the set. Verdict is True iff shared."""
+    out = []
+    for i, ni in enumerate(moduli):
+        shared = False
+        for j, nj in enumerate(moduli):
+            if i == j:
+                continue
+            g = _gcd(ni, nj)
+            if 1 < g < ni:
+                shared = True
+                break
+        out.append(shared)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# EC public-key hygiene: on-curve validation for the prime-order NIST/SEC curves
+# (P-256, P-384, secp256k1 all have cofactor 1, so on-curve + in-range +
+# non-identity is sufficient; there is no small-order subgroup to screen, unlike
+# the cofactor-8 Edwards curve handled by the rfc9421 keygate).
+# ---------------------------------------------------------------------------
+
+EC_CURVES = {
+    "p256": {
+        "p": 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff,
+        "a": 0xffffffff00000001000000000000000000000000fffffffffffffffffffffffc,
+        "b": 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b,
+        "gx": 0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
+        "gy": 0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5,
+    },
+    "p384": {
+        "p": 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff,
+        "a": 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc,
+        "b": 0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef,
+        "gx": 0xaa87ca22be8b05378eb1c71ef320ad746e1d3b628ba79b9859f741e082542a385502f25dbf55296c3a545e3872760ab7,
+        "gy": 0x3617de4a96262c6f5d9e98bf9292dc29f8f41dbd289a147ce9da3113b5f0b8c00a60b1ce1d7e819d7a431d7c90ea0e5f,
+    },
+    "secp256k1": {
+        "p": 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f,
+        "a": 0,
+        "b": 7,
+        "gx": 0x79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798,
+        "gy": 0x483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8,
+    },
+}
+
+
+def ec_key_verdict(curve: str, x: int, y: int) -> tuple[bool, str]:
+    """Accept/reject an affine EC public point (x, y) on a named prime-order
+    curve. Reject out-of-range coordinates and off-curve points."""
+    c = EC_CURVES[curve]
+    p, a, b = c["p"], c["a"], c["b"]
+    if x < 0 or x >= p or y < 0 or y >= p:
+        return (False, "coordinate_out_of_range")
+    if (y * y - (x * x * x + a * x + b)) % p != 0:
+        return (False, "not_on_curve")
+    return (True, "ok")
+
+
+def ec_point_mul(curve: str, k: int) -> tuple[int, int]:
+    """Scalar multiplication k*G on the named curve, for the GENERATOR only (to
+    produce genuinely-valid test points). Runners never need this: they only
+    verify on-curve. Standard affine double-and-add over the prime field."""
+    c = EC_CURVES[curve]
+    p, a = c["p"], c["a"]
+
+    def add(P, Q):
+        if P is None:
+            return Q
+        if Q is None:
+            return P
+        x1, y1 = P
+        x2, y2 = Q
+        if x1 == x2 and (y1 + y2) % p == 0:
+            return None
+        if P == Q:
+            m = (3 * x1 * x1 + a) * pow(2 * y1, -1, p) % p
+        else:
+            m = (y2 - y1) * pow(x2 - x1, -1, p) % p
+        x3 = (m * m - x1 - x2) % p
+        y3 = (m * (x1 - x3) - y1) % p
+        return (x3, y3)
+
+    R = None
+    G = (c["gx"], c["gy"])
+    while k > 0:
+        if k & 1:
+            R = add(R, G)
+        G = add(G, G)
+        k >>= 1
+    return R

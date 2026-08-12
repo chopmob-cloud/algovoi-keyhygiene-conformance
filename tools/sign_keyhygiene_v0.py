@@ -35,7 +35,7 @@ VERSION = "0.1.0"
 CANONICALIZER = "JCS(RFC8785)+EdDSA"
 HEAD_TYP = "corpus-head+jws"
 TS = "2026-08-12T00:00:00Z"
-SECTIONS = ("primality", "rsa_modulus_hygiene")
+SECTIONS = ("primality", "rsa_modulus_hygiene", "batch_common_factor", "ec_key_hygiene")
 
 KEY_ENV = "ALGOVOI_KEYHYGIENE_SIGNING_KEY"
 DEFAULT_KEY_PATH = os.path.join(

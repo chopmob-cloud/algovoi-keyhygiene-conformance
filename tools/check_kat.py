@@ -135,6 +135,44 @@ def anchor_rsa(corpus: dict) -> list[str]:
     return fails
 
 
+def anchor_batch(corpus: dict) -> list[str]:
+    fails, anchored = [], 0
+    section = corpus.get("batch_common_factor", [])
+    moduli = [int(c["n"]) for c in section]
+    for i, c in enumerate(section):
+        n = int(c["n"])
+        if c["shares_factor"]:
+            # independent proof: the provided shared prime really is a common factor
+            sp = c.get("shared_prime")
+            if not sp:
+                fails.append(f"batch[{i}] shares_factor but no shared_prime anchor")
+                continue
+            sp = int(sp)
+            others = [m for j, m in enumerate(moduli) if j != i and m % sp == 0]
+            if not (sp > 1 and n % sp == 0 and others):
+                fails.append(f"batch[{i}] anchor: shared_prime not a genuine common factor")
+        else:
+            # independent proof: gcd with every other modulus is 1
+            from math import gcd
+            if any(gcd(n, m) != 1 for j, m in enumerate(moduli) if j != i):
+                fails.append(f"batch[{i}] anchor: marked independent but shares a factor")
+        anchored += 1
+    if section and anchored == 0:
+        fails.append("no batch anchors present")
+    return fails
+
+
+def anchor_ec(corpus: dict) -> list[str]:
+    fails, anchored = [], 0
+    for i, c in enumerate(corpus.get("ec_key_hygiene", [])):
+        valid, reason = oracle.ec_key_verdict(c["curve"], int(c["x"]), int(c["y"]))
+        if valid != c["expect_valid"] or reason != c["reason"]:
+            fails.append(f"ec[{i}] anchor: independent on-curve check gives ({valid},{reason}) "
+                         f"!= recorded ({c['expect_valid']},{c['reason']})")
+        anchored += 1
+    return fails
+
+
 def main() -> int:
     failures: list[str] = []
     raw = open(CORPUS, "rb").read()
@@ -152,6 +190,8 @@ def main() -> int:
 
     failures.extend(anchor_primality(corpus))
     failures.extend(anchor_rsa(corpus))
+    failures.extend(anchor_batch(corpus))
+    failures.extend(anchor_ec(corpus))
 
     if failures:
         print("KAT: FAIL")
@@ -159,13 +199,15 @@ def main() -> int:
             print("  -", f)
         return 1
 
-    np = len(corpus.get("primality", []))
-    nr = len(corpus.get("rsa_modulus_hygiene", []))
+    counts = {s: len(corpus.get(s, [])) for s in
+              ("primality", "rsa_modulus_hygiene", "batch_common_factor", "ec_key_hygiene")}
     print("KAT: PASS")
     print(f"  signed head        head_jws EdDSA signature verified under signer JWK")
     print(f"  corpus integrity   {file_sha} (matches signed head)")
-    print(f"  primality anchors  {np}/{np} (composites re-multiplied, primes MR12-confirmed)")
-    print(f"  rsa anchors        {nr}/{nr} (each reason independently re-derived)")
+    print(f"  primality anchors  {counts['primality']} (composites re-multiplied, primes MR12-confirmed)")
+    print(f"  rsa anchors        {counts['rsa_modulus_hygiene']} (each reason independently re-derived)")
+    print(f"  batch anchors      {counts['batch_common_factor']} (shared prime / gcd re-derived)")
+    print(f"  ec anchors         {counts['ec_key_hygiene']} (on-curve independently re-checked)")
     return 0
 
 

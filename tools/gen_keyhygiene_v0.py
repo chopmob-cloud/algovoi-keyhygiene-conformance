@@ -177,6 +177,60 @@ def build_rsa(rng: random.Random) -> list[dict]:
     return cases
 
 
+def build_batch(rng: random.Random) -> list[dict]:
+    """A SET of RSA moduli, some sharing a prime (batch-GCD / Mining-your-Ps-and-Qs).
+    Per-key verdict = shares a prime with another key in the set."""
+    shared_p = oracle.gen_prime(512, rng)
+    shared_r = oracle.gen_prime(512, rng)
+    qa, qb = oracle.gen_prime(512, rng), oracle.gen_prime(512, rng)
+    qe, qf = oracle.gen_prime(512, rng), oracle.gen_prime(512, rng)
+    ind1 = oracle.gen_prime(512, rng) * oracle.gen_prime(512, rng)
+    ind2 = oracle.gen_prime(512, rng) * oracle.gen_prime(512, rng)
+
+    raw = [
+        (shared_p * qa, str(shared_p), "shares prime P with key #1"),
+        (shared_p * qb, str(shared_p), "shares prime P with key #0"),
+        (ind1, None, "independent key"),
+        (shared_r * qe, str(shared_r), "shares prime R with key #5"),
+        (shared_r * qf, str(shared_r), "shares prime R with key #3"),
+        (ind2, None, "independent key"),
+    ]
+    moduli = [n for n, _, _ in raw]
+    verdicts = oracle.batch_common_factor_verdicts(moduli)
+    cases = []
+    for (n, shared_prime, note), shares in zip(raw, verdicts):
+        c = {"n": str(n), "shares_factor": shares, "note": note}
+        if shared_prime is not None:
+            assert shares and n % int(shared_prime) == 0
+            c["shared_prime"] = shared_prime  # crafted weak key; not a secret
+        cases.append(c)
+    return cases
+
+
+def build_ec(rng: random.Random) -> list[dict]:
+    """EC public points on the prime-order curves P-256, P-384, secp256k1:
+    valid on-curve points, off-curve points, and out-of-range coordinates."""
+    cases = []
+    for curve in ("p256", "p384", "secp256k1"):
+        c = oracle.EC_CURVES[curve]
+        p = c["p"]
+        # valid: G and a couple of genuine multiples
+        for k, note in [(1, "generator G"), (2, "2*G"), (rng.randint(3, 1 << 40), "k*G")]:
+            x, y = oracle.ec_point_mul(curve, k)
+            case = {"curve": curve, "x": str(x), "y": str(y), "expect_valid": True,
+                    "reason": "ok", "note": f"valid point {note}"}
+            assert oracle.ec_key_verdict(curve, x, y) == (True, "ok")
+            cases.append(case)
+        # off-curve: G with y perturbed
+        gx, gy = c["gx"], (c["gy"] + 1) % p
+        cases.append({"curve": curve, "x": str(gx), "y": str(gy), "expect_valid": False,
+                      "reason": "not_on_curve", "note": "off-curve (perturbed y)"})
+        # out-of-range: x = p
+        cases.append({"curve": curve, "x": str(p), "y": str(c["gy"]), "expect_valid": False,
+                      "reason": "coordinate_out_of_range", "note": "x == p (out of range)"})
+    return cases
+
+
 def main() -> int:
     rng = random.Random(0xA1601)  # fixed seed: vectors are public, reproducible
     corpus = {
@@ -193,19 +247,21 @@ def main() -> int:
         },
         "primality": build_primality(rng),
         "rsa_modulus_hygiene": build_rsa(rng),
+        "batch_common_factor": build_batch(rng),
+        "ec_key_hygiene": build_ec(rng),
     }
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, "keyhygiene_v0.json")
     with open(out, "w", encoding="utf-8") as fh:
         json.dump(corpus, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
-    n_prime = sum(1 for c in corpus["primality"] if c["expect_prime"])
-    n_comp = len(corpus["primality"]) - n_prime
-    n_acc = sum(1 for c in corpus["rsa_modulus_hygiene"] if c["expect_accept"])
-    n_rej = len(corpus["rsa_modulus_hygiene"]) - n_acc
     print(f"wrote {out}")
-    print(f"  primality: {len(corpus['primality'])} ({n_prime} prime, {n_comp} composite)")
-    print(f"  rsa_modulus_hygiene: {len(corpus['rsa_modulus_hygiene'])} ({n_acc} accept, {n_rej} reject)")
+    total = 0
+    for name, cases in corpus.items():
+        if isinstance(cases, list):
+            print(f"  {name}: {len(cases)}")
+            total += len(cases)
+    print(f"  total cases: {total}")
     return 0
 
 

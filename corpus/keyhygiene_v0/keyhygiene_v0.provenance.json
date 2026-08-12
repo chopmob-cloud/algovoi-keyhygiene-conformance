@@ -5,13 +5,13 @@
       "chain_seq": 0,
       "issuer_id": "did:web:algovoi.co.uk",
       "prev_receipt_hash": "",
-      "receipt_hash": "sha256:025e352bf85216fa8b724215c5441e53a4fe5003ba7fdc5b322d75f7d3951a21",
-      "chain_ref": "sha256:c5f2b5089fbea23b94fb58333339d18614948cb500bfe934d6c1ec6dface84ef",
+      "receipt_hash": "sha256:e98d28050c9fbd382620f16362ea9d072c32f2d679fe66a17c41dadd498d2822",
+      "chain_ref": "sha256:5be8be49ee9ca8d7b90bbe62f221f4a2ab575728d86361c590dc751eff7722fd",
       "payload": {
         "event": "sign_corpus_head",
         "corpus_id": "keyhygiene_v0",
         "version": "0.1.0",
-        "corpus_digest": "sha256:a85c0f4ff4ebb503bc445921a5bbf9f7da72535831884e833fc23e8d79aa1d4c",
+        "corpus_digest": "sha256:e940868925f07e1fd217d92fe1ecfd7be3da0c9a14ca79b75157dcab0a77e171",
         "signer_kid": "bdf75b272d5ac367d7b80cf8d8016aa5",
         "ts": "2026-08-12T00:00:00Z",
         "note": "local dev-key signing; foundation/KMS custody and publish are gated"
