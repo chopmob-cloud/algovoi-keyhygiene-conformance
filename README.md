@@ -105,7 +105,7 @@ stdlib primality shortcut):
 | Elixir | native | PHP | GMP |
 
 Latest sealed run: **53 cases across four sections, full 12-way consensus, 12/12
-hermetic cells PASS** (`kaf/receipts/keyhygiene_v0.seq1.receipt.json`).
+hermetic cells PASS** (`kaf/receipts/keyhygiene_v0.seq2.receipt.json`).
 
 ## Security scope (defensive only)
 
@@ -126,7 +126,7 @@ ALGOVOI_LOCAL_SRC=/path/to/algovoi-corpus-cm/src \
   python tools/check_kat.py                            # fail-closed KAT gate
 bash tools/run_consensus.sh --require 12               # twelve-way byte-for-byte consensus
 bash kaf/run_cells.sh                                  # hermetic per-language Docker cells
-python kaf/kaf_verify.py kaf/receipts/keyhygiene_v0.seq1.receipt.json  # verify the sealed receipt
+python kaf/kaf_verify.py kaf/receipts/keyhygiene_v0.seq2.receipt.json  # verify the sealed receipt
 ```
 
 Individual runners live under `runners/<lang>/` and each exits 0 iff every case
