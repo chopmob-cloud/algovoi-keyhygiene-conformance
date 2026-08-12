@@ -54,7 +54,8 @@ run_lang() {
     kotlin)
       have kotlinc && have java || { echo "ABSENT: no kotlinc/java"; return; }
       [ -f "$HERE/runners/kotlin/Verify.kt" ] || { echo "ABSENT: kotlin runner not present"; return; }
-      ( cd "$HERE/runners/kotlin" && kotlinc Verify.kt -include-runtime -d v.jar >/dev/null 2>&1 && java -jar v.jar "$CORPUS" ) >/dev/null 2>&1 && echo PASS || echo FAIL ;;
+      [ -n "${KEYHYGIENE_JSON_JAR:-}" ] || { echo "ABSENT: set KEYHYGIENE_JSON_JAR to the org.json jar"; return; }
+      ( cd "$HERE/runners/kotlin" && kotlinc Verify.kt -cp "$KEYHYGIENE_JSON_JAR" -include-runtime -d v.jar >/dev/null 2>&1 && java -cp "v.jar:$KEYHYGIENE_JSON_JAR" VerifyKt "$CORPUS" ) >/dev/null 2>&1 && echo PASS || echo FAIL ;;
     scala)
       have scala-cli || { echo "ABSENT: no scala-cli"; return; }
       [ -f "$HERE/runners/scala/verify.scala" ] || { echo "ABSENT: scala runner not present"; return; }
