@@ -1,5 +1,7 @@
 # algovoi-keyhygiene-conformance
 
+[![12-way consensus](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml/badge.svg)](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml)
+
 A signed, cross-language conformance battery for **RSA/EC public-key hygiene and
 primality soundness**. Given a candidate integer or a public key, every
 independent implementation must reproduce the same accept/reject verdict,
