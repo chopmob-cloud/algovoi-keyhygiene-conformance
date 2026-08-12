@@ -60,8 +60,14 @@ def main() -> int:
                 f"ec_key_hygiene[{i}] {c['note']}: got ({valid},{reason}) "
                 f"want ({c['expect_valid']},{c['reason']})")
 
+    for i, c in enumerate(corpus.get("roca_fingerprint", [])):
+        got = oracle.roca_fingerprint_verdict(int(c["n"]))
+        if got != c["roca_vulnerable"]:
+            failures.append(f"roca_fingerprint[{i}] {c['note']}: got roca={got} want {c['roca_vulnerable']}")
+
     total = sum(len(corpus.get(s, [])) for s in
-                ("primality", "rsa_modulus_hygiene", "batch_common_factor", "ec_key_hygiene"))
+                ("primality", "rsa_modulus_hygiene", "batch_common_factor",
+                 "ec_key_hygiene", "roca_fingerprint"))
     if failures:
         print(f"FAIL: {len(failures)}/{total} cases diverged")
         for f in failures[:20]:

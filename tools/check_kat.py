@@ -173,6 +173,21 @@ def anchor_ec(corpus: dict) -> list[str]:
     return fails
 
 
+def anchor_roca(corpus: dict) -> list[str]:
+    fails, anchored = [], 0
+    primes = corpus.get("policy", {}).get("roca_primes")
+    for i, c in enumerate(corpus.get("roca_fingerprint", [])):
+        # independent re-derivation of the fingerprint from n and the published
+        # prime set: n mod pf is a power of 65537 for every pf.
+        got = oracle.roca_fingerprint_verdict(int(c["n"]))
+        if primes and set(primes) != set(oracle.ROCA_PRIMES):
+            fails.append(f"roca[{i}] anchor: corpus roca_primes != oracle ROCA_PRIMES")
+        if got != c["roca_vulnerable"]:
+            fails.append(f"roca[{i}] anchor: independent fingerprint {got} != recorded {c['roca_vulnerable']}")
+        anchored += 1
+    return fails
+
+
 def main() -> int:
     failures: list[str] = []
     raw = open(CORPUS, "rb").read()
@@ -192,6 +207,7 @@ def main() -> int:
     failures.extend(anchor_rsa(corpus))
     failures.extend(anchor_batch(corpus))
     failures.extend(anchor_ec(corpus))
+    failures.extend(anchor_roca(corpus))
 
     if failures:
         print("KAT: FAIL")
@@ -200,7 +216,8 @@ def main() -> int:
         return 1
 
     counts = {s: len(corpus.get(s, [])) for s in
-              ("primality", "rsa_modulus_hygiene", "batch_common_factor", "ec_key_hygiene")}
+              ("primality", "rsa_modulus_hygiene", "batch_common_factor",
+               "ec_key_hygiene", "roca_fingerprint")}
     print("KAT: PASS")
     print(f"  signed head        head_jws EdDSA signature verified under signer JWK")
     print(f"  corpus integrity   {file_sha} (matches signed head)")
@@ -208,6 +225,7 @@ def main() -> int:
     print(f"  rsa anchors        {counts['rsa_modulus_hygiene']} (each reason independently re-derived)")
     print(f"  batch anchors      {counts['batch_common_factor']} (shared prime / gcd re-derived)")
     print(f"  ec anchors         {counts['ec_key_hygiene']} (on-curve independently re-checked)")
+    print(f"  roca anchors       {counts['roca_fingerprint']} (fingerprint independently re-derived)")
     return 0
 
 

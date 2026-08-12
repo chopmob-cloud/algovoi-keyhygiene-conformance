@@ -231,6 +231,27 @@ def build_ec(rng: random.Random) -> list[dict]:
     return cases
 
 
+def build_roca(rng: random.Random) -> list[dict]:
+    """ROCA (CVE-2017-15361) fingerprint: moduli whose both primes are Infineon-
+    structured (p ≡ 65537^a mod M) carry the fingerprint; normal moduli do not."""
+    cases = []
+    for i in range(3):
+        p = oracle.gen_roca_prime(512, rng)
+        q = oracle.gen_roca_prime(512, rng)
+        n = p * q
+        assert oracle.roca_fingerprint_verdict(n), "structured modulus must be positive"
+        cases.append({"n": str(n), "roca_vulnerable": True,
+                      "note": f"ROCA-structured modulus #{i} (both primes 65537^a mod M)"})
+    made = 0
+    while made < 3:
+        n = oracle.gen_prime(512, rng) * oracle.gen_prime(512, rng)
+        if not oracle.roca_fingerprint_verdict(n):
+            cases.append({"n": str(n), "roca_vulnerable": False,
+                          "note": "normal RSA modulus (fingerprint-negative)"})
+            made += 1
+    return cases
+
+
 def main() -> int:
     rng = random.Random(0xA1601)  # fixed seed: vectors are public, reproducible
     corpus = {
@@ -244,11 +265,14 @@ def main() -> int:
             "rsa_allowed_bits": sorted(oracle.BR_ALLOWED_BITS),
             "rsa_allowed_e": sorted(oracle.BR_ALLOWED_E),
             "rsa_policy_basis": "CA/Browser Forum Baseline Requirements (tracked)",
+            "roca_generator": oracle.ROCA_GENERATOR,
+            "roca_primes": oracle.ROCA_PRIMES,
         },
         "primality": build_primality(rng),
         "rsa_modulus_hygiene": build_rsa(rng),
         "batch_common_factor": build_batch(rng),
         "ec_key_hygiene": build_ec(rng),
+        "roca_fingerprint": build_roca(rng),
     }
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, "keyhygiene_v0.json")
