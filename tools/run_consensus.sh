@@ -49,7 +49,8 @@ run_lang() {
     java)
       have javac && have java || { echo "ABSENT: no jdk"; return; }
       [ -f "$HERE/runners/java/Verify.java" ] || { echo "ABSENT: java runner not present"; return; }
-      ( cd "$HERE/runners/java" && javac Verify.java && java Verify "$CORPUS" ) >/dev/null 2>&1 && echo PASS || echo FAIL ;;
+      [ -n "${KEYHYGIENE_JSON_JAR:-}" ] || { echo "ABSENT: set KEYHYGIENE_JSON_JAR to the org.json jar"; return; }
+      ( cd "$HERE/runners/java" && javac -cp "$KEYHYGIENE_JSON_JAR" Verify.java && java -cp ".:$KEYHYGIENE_JSON_JAR" Verify "$CORPUS" ) >/dev/null 2>&1 && echo PASS || echo FAIL ;;
     kotlin)
       have kotlinc && have java || { echo "ABSENT: no kotlinc/java"; return; }
       [ -f "$HERE/runners/kotlin/Verify.kt" ] || { echo "ABSENT: kotlin runner not present"; return; }

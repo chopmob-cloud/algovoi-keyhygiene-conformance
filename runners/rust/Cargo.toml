@@ -1,0 +1,18 @@
+[package]
+name = "verify_rust"
+version = "0.1.0"
+edition = "2021"
+description = "Rust runner for the keyhygiene primality & RSA-modulus-hygiene conformance battery"
+
+[[bin]]
+name = "verify_rust"
+path = "src/main.rs"
+
+[dependencies]
+num-bigint = "0.4"
+num-integer = "0.1"
+num-traits = "0.2"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
