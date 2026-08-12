@@ -117,6 +117,25 @@ stdlib primality shortcut):
 Latest sealed run: **59 cases across five sections, full 12-way consensus, 12/12
 hermetic cells PASS** (`kaf/receipts/keyhygiene_v0.seq3.receipt.json`).
 
+## Comparison with the sibling conformance corpora
+
+This battery is the **L0** floor of a three-layer assurance stack; each layer is a
+signed, cross-language, N-way conformance corpus sealed the same way (KAF:
+Agreement · KAT · Cells · Seal).
+
+| | keyhygiene (L0, this repo) | [jcs-conformance-vectors](https://github.com/chopmob-cloud/algovoi-jcs-conformance-vectors) (L1) | [rfc9421-conformance](https://github.com/chopmob-cloud/algovoi-rfc9421-conformance) (L2) |
+|---|---|---|---|
+| Question | is the key / prime sound? | are the canonical bytes right? | is the signature verdict right? |
+| Standard | RSA/EC key hygiene + primality | RFC 8785 (JCS) canonicalisation | RFC 9421 (+ RFC 9530) HTTP signatures |
+| Each case | integer / public key → verdict | JSON value → canonical bytes/hash | signing-base + key → accept/reject |
+| Adversarial focus | strong pseudoprimes, ROCA, batch-GCD, close primes, off-curve points | Unicode / number-form / duplicate-key hazards | malleability, small-order keys, ECDSA range/off-curve |
+| Independent implementations | **12 languages** | 10 languages | 12 languages |
+| Assurance axes (KAF) | Agreement · KAT · Cells · Seal | Agreement · Strata · Cells · Seal | Agreement · KAT · Cells · Seal |
+
+Together the three read **is the key sound → canonicalise → sign → verify** end to
+end. Where L1/L2 are payment-adjacent, L0 sits under every PKI, so it reaches the
+RSA-dominant regulated industries directly.
+
 ## Security scope (defensive only)
 
 This is audit / key-acceptance conformance tooling. It ships **public keys and
