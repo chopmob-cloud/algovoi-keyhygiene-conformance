@@ -1,0 +1,40 @@
+{
+  "manifest_version": 1,
+  "corpus_id": "keyhygiene_v0",
+  "version": "0.1.0",
+  "canonicalizer": "JCS(RFC8785)+EdDSA",
+  "signers": [
+    {
+      "kid": "bdf75b272d5ac367d7b80cf8d8016aa5",
+      "jwk": {
+        "kty": "OKP",
+        "crv": "Ed25519",
+        "x": "9Mcg43i98yRwSErfrtaCP60n5AbP_ry8n6WTEw43pb0",
+        "kid": "bdf75b272d5ac367d7b80cf8d8016aa5"
+      },
+      "signer_did": "did:web:algovoi.co.uk"
+    }
+  ],
+  "vectors": [],
+  "changelog": [],
+  "custody": "local secret Ed25519 key held off-repo; rotate to KMS/foundation before publish (gated)",
+  "head": {
+    "corpus_id": "keyhygiene_v0",
+    "version": "0.1.0",
+    "canonicalizer": "JCS(RFC8785)+EdDSA",
+    "corpus_digest": "sha256:a85c0f4ff4ebb503bc445921a5bbf9f7da72535831884e833fc23e8d79aa1d4c",
+    "file_sha256": "sha256:881ede642ad67db899ae55d0e86c75a3aee3f1a66daaa164ac627032e28850e4",
+    "section_counts": {
+      "primality": 23,
+      "rsa_modulus_hygiene": 9
+    },
+    "section_digests": {
+      "primality": "sha256:17f735dfbd427ba2b46612fbf02e77bfa3c2f802566c128f97dad12c28a99953",
+      "rsa_modulus_hygiene": "sha256:75fd49b584ae1575e3f8fe63af29cff0b199161500ebf32cd44e58df5f37d70b"
+    },
+    "total_cases": 32
+  },
+  "head_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImJkZjc1YjI3MmQ1YWMzNjdkN2I4MGNmOGQ4MDE2YWE1IiwidHlwIjoiY29ycHVzLWhlYWQrandzIn0.eyJjYW5vbmljYWxpemVyIjoiSkNTKFJGQzg3ODUpK0VkRFNBIiwiY29ycHVzX2RpZ2VzdCI6InNoYTI1NjphODVjMGY0ZmY0ZWJiNTAzYmM0NDU5MjFhNWJiZjlmN2RhNzI1MzU4MzE4ODRlODMzZmMyM2U4ZDc5YWExZDRjIiwiY29ycHVzX2lkIjoia2V5aHlnaWVuZV92MCIsImZpbGVfc2hhMjU2Ijoic2hhMjU2Ojg4MWVkZTY0MmFkNjdkYjg5OWFlNTVkMGU4NmM3NWEzYWVlM2YxYTY2ZGFhYTE2NGFjNjI3MDMyZTI4ODUwZTQiLCJzZWN0aW9uX2NvdW50cyI6eyJwcmltYWxpdHkiOjIzLCJyc2FfbW9kdWx1c19oeWdpZW5lIjo5fSwic2VjdGlvbl9kaWdlc3RzIjp7InByaW1hbGl0eSI6InNoYTI1NjoxN2Y3MzVkZmJkNDI3YmEyYjQ2NjEyZmJmMDJlNzdiZmEzYzJmODAyNTY2YzEyOGY5N2RhZDEyYzI4YTk5OTUzIiwicnNhX21vZHVsdXNfaHlnaWVuZSI6InNoYTI1Njo3NWZkNDliNTg0YWUxNTc1ZTNmOGZlNjNhZjI5Y2ZmMGIxOTkxNjE1MDBlYmYzMmNkNDRlNThkZjVmMzdkNzBiIn0sInRvdGFsX2Nhc2VzIjozMiwidmVyc2lvbiI6IjAuMS4wIn0._h5IiYPjTMHctwzJKxCZZqSvZdbvXYsZ7EPCI4QGE9LtJQuRvriTl1PRgcLEwKpLPl9T8r278aFr5rqtDRCgAA",
+  "head_typ": "corpus-head+jws",
+  "signed_at": "2026-08-12T00:00:00Z"
+}

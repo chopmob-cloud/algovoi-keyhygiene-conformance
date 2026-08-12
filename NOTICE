@@ -1,0 +1,7 @@
+algovoi-keyhygiene-conformance
+Copyright 2026 AlgoVoi
+
+This product includes software developed by AlgoVoi (https://algovoi.co.uk).
+
+A signed, cross-language conformance battery for RSA/EC public-key hygiene and
+primality soundness. Licensed under the Apache License, Version 2.0.

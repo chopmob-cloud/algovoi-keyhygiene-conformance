@@ -1,0 +1,280 @@
+#!/usr/bin/env python3
+"""Ground-truth oracle for the key-hygiene & primality conformance battery.
+
+Everything here is the REFERENCE decision surface: the corpus generator freezes
+these verdicts, and every language runner must reproduce them. Two independent
+methods back the highest-value calls so the KAT gate can cross-check them:
+
+  - primality:  Baillie-PSW (strong Miller-Rabin base 2 + strong Lucas), which
+                has no known counterexample, is the ground truth. A SEPARATE
+                deterministic Miller-Rabin over the first 12 prime bases is the
+                KAT cross-check for the numbers small enough to trust it on.
+  - RSA hygiene: small-factor trial division, Fermat close-prime factorisation
+                (bounded), and perfect-power detection, each an independent
+                structural test on the public modulus.
+
+No third-party dependency: this must be portable to eleven other languages, so
+it uses only integer arithmetic every stack has.
+"""
+from __future__ import annotations
+
+import random
+
+# ---------------------------------------------------------------------------
+# integer helpers (portable: every target language has these primitives)
+# ---------------------------------------------------------------------------
+
+_SMALL_PRIMES = [
+    2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71,
+    73, 79, 83, 89, 97, 101, 103, 107, 109, 113, 127, 131, 137, 139, 149, 151,
+    157, 163, 167, 173, 179, 181, 191, 193, 197, 199, 211, 223, 227, 229, 233,
+    239, 241, 251,
+]
+
+
+def isqrt(n: int) -> int:
+    """Integer square root (floor). Portable Newton iteration."""
+    if n < 0:
+        raise ValueError("isqrt of negative")
+    if n < 2:
+        return n
+    x = 1 << ((n.bit_length() + 1) // 2)
+    while True:
+        y = (x + n // x) // 2
+        if y >= x:
+            return x
+        x = y
+
+
+def is_perfect_power(n: int) -> bool:
+    """True if n == a**b for integers a >= 2, b >= 2. Modulus of this form has a
+    trivially-recoverable factor, so an RSA modulus must never be one."""
+    if n < 4:
+        return False
+    for b in range(2, n.bit_length() + 1):
+        lo, hi = 2, 1 << (n.bit_length() // b + 1)
+        while lo <= hi:
+            mid = (lo + hi) // 2
+            p = mid ** b
+            if p == n:
+                return True
+            if p < n:
+                lo = mid + 1
+            else:
+                hi = mid - 1
+    return False
+
+
+# ---------------------------------------------------------------------------
+# primality: Baillie-PSW (the ground truth) + fixed-base MR (the KAT cross-check)
+# ---------------------------------------------------------------------------
+
+def _mr_strong(n: int, a: int) -> bool:
+    """Strong (Miller-Rabin) probable-prime test of n to base a. True = probably
+    prime for this base; False = definitely composite."""
+    if n % a == 0:
+        return n == a
+    d = n - 1
+    r = 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    x = pow(a, d, n)
+    if x == 1 or x == n - 1:
+        return True
+    for _ in range(r - 1):
+        x = (x * x) % n
+        if x == n - 1:
+            return True
+    return False
+
+
+def _jacobi(a: int, n: int) -> int:
+    """Jacobi symbol (a/n), n odd positive."""
+    a %= n
+    result = 1
+    while a != 0:
+        while a % 2 == 0:
+            a //= 2
+            if n % 8 in (3, 5):
+                result = -result
+        a, n = n, a
+        if a % 4 == 3 and n % 4 == 3:
+            result = -result
+        a %= n
+    return result if n == 1 else 0
+
+
+def _lucas_strong(n: int) -> bool:
+    """Strong Lucas probable-prime test with Selfridge parameters (the Lucas half
+    of Baillie-PSW)."""
+    # Selfridge D: first term of 5, -7, 9, -11, 13, ... with Jacobi(D, n) = -1.
+    D, mag = 5, 5
+    while True:
+        j = _jacobi(D, n)
+        if j == -1:
+            break
+        if j == 0 and abs(D) != n:
+            return False  # D shares a factor with n
+        mag += 2
+        # magnitudes 5,7,9,11,13,... carry signs +,-,+,-,+,...
+        D = mag if ((mag - 5) // 2) % 2 == 0 else -mag
+    P, Q = 1, (1 - D) // 4
+
+    # decompose n+1 = d * 2^s with d odd
+    d, s = n + 1, 0
+    while d % 2 == 0:
+        d //= 2
+        s += 1
+
+    def _lucas_uv(k: int):
+        """U_k, V_k, Q^k mod n via binary expansion of k."""
+        u, v, qk = 0, 2, 1
+        for b in bin(k)[2:]:
+            u, v = (u * v) % n, (v * v - 2 * qk) % n
+            qk = (qk * qk) % n
+            if b == '1':
+                nu, nv = P * u + v, D * u + P * v
+                if nu % 2:
+                    nu += n
+                if nv % 2:
+                    nv += n
+                u, v = (nu // 2) % n, (nv // 2) % n
+                qk = (qk * Q) % n
+        return u, v, qk
+
+    U, V, Qk = _lucas_uv(d)
+    if U == 0 or V == 0:
+        return True
+    for _ in range(s - 1):
+        V = (V * V - 2 * Qk) % n
+        Qk = (Qk * Qk) % n
+        if V == 0:
+            return True
+    return False
+
+
+def is_prime(n: int) -> bool:
+    """Baillie-PSW: the ground-truth primality test. No known counterexample."""
+    if n < 2:
+        return False
+    for p in _SMALL_PRIMES:
+        if n == p:
+            return True
+        if n % p == 0:
+            return False
+    if not _mr_strong(n, 2):
+        return False
+    if is_perfect_power(n):
+        return False
+    return _lucas_strong(n)
+
+
+# Deterministic MR over the first 12 prime bases. Sound (matches BPSW) for all
+# n < 3.18e23, so it is the independent KAT cross-check on primality cases below
+# that bound. Above it, or on a number crafted to be a strong pseudoprime to
+# these exact bases, it is NOT sound and must not be used as an anchor.
+_MR12_BASES = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37]
+MR12_SOUND_BOUND = 318665857834031151167461  # 3.18665...e23
+
+
+def mr_fixed_base(n: int, bases=_MR12_BASES) -> bool:
+    """A NAIVE primality check: even-test then strong Miller-Rabin to a FIXED set
+    of bases, with NO extended trial division. This is deliberately fallible: on
+    a strong pseudoprime crafted for these bases (with no small factors) it
+    returns True (prime) for a composite. The battery's primality section exists
+    to expose exactly that failure mode; do not use this as ground truth."""
+    if n < 2:
+        return False
+    if n < 4:
+        return True  # 2, 3
+    if n % 2 == 0:
+        return False
+    return all(_mr_strong(n, a) for a in bases)
+
+
+# ---------------------------------------------------------------------------
+# prime generation (deterministic, seeded: test vectors are public, not secret)
+# ---------------------------------------------------------------------------
+
+def gen_prime(bits: int, rng: random.Random) -> int:
+    while True:
+        cand = rng.getrandbits(bits) | (1 << (bits - 1)) | 1
+        if is_prime(cand):
+            return cand
+
+
+def next_prime(n: int) -> int:
+    n = n + 1 if n % 2 == 0 else n + 2
+    while not is_prime(n):
+        n += 2
+    return n
+
+
+# ---------------------------------------------------------------------------
+# RSA modulus hygiene detectors (independent structural tests on n)
+# ---------------------------------------------------------------------------
+
+def smallest_factor(n: int, bound: int = 1_000_000) -> int | None:
+    """Smallest prime factor of n below `bound`, else None. A shared/known small
+    factor makes the modulus trivially factorable."""
+    for p in _small_prime_sieve(bound):
+        if n % p == 0:
+            return p
+    return None
+
+
+def _small_prime_sieve(bound: int) -> list[int]:
+    sieve = bytearray([1]) * (bound + 1)
+    sieve[0:2] = b"\x00\x00"
+    for i in range(2, isqrt(bound) + 1):
+        if sieve[i]:
+            sieve[i * i::i] = bytearray(len(sieve[i * i::i]))
+    return [i for i in range(2, bound + 1) if sieve[i]]
+
+
+def fermat_close_factor(n: int, max_steps: int = 1 << 16):
+    """Fermat factorisation, bounded. Returns (p, q) if p,q are close enough to
+    be found within max_steps, else None. Close primes (|p-q| small) are the
+    RNG-bug / weak-keygen class and are detectable exactly this way."""
+    if n % 2 == 0:
+        return (2, n // 2)
+    a = isqrt(n)
+    if a * a < n:
+        a += 1
+    for _ in range(max_steps):
+        b2 = a * a - n
+        if b2 >= 0:
+            b = isqrt(b2)
+            if b * b == b2:
+                return (a - b, a + b)
+        a += 1
+    return None
+
+
+# CA/Browser Forum Baseline Requirements: RSA modulus bit-length must be one of
+# these, and 65537 is the canonical public exponent (BRs require 3 <= e and a
+# small allowed set in practice; we track e in {3, 65537} with 65537 canonical).
+BR_ALLOWED_BITS = {2048, 3072, 4096}
+BR_ALLOWED_E = {3, 65537}
+
+
+def rsa_modulus_verdict(n: int, e: int) -> tuple[bool, str]:
+    """Accept/reject an RSA public key (n, e) under the BR-tracking policy.
+    Returns (accept, reason). Reject reasons are ordered most-structural first."""
+    if n <= 3 or n % 2 == 0:
+        return (False, "modulus_not_odd_or_too_small")
+    if is_perfect_power(n):
+        return (False, "modulus_perfect_power")
+    sf = smallest_factor(n)
+    if sf is not None:
+        return (False, "modulus_small_factor")
+    if fermat_close_factor(n) is not None:
+        return (False, "modulus_close_primes")
+    if n.bit_length() not in BR_ALLOWED_BITS:
+        return (False, "modulus_bit_length_not_allowed")
+    if e not in BR_ALLOWED_E:
+        return (False, "public_exponent_not_allowed")
+    if e % 2 == 0 or e < 3:
+        return (False, "public_exponent_invalid")
+    return (True, "ok")
