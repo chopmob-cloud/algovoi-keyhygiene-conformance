@@ -276,7 +276,9 @@ def main() -> int:
     }
     os.makedirs(OUT_DIR, exist_ok=True)
     out = os.path.join(OUT_DIR, "keyhygiene_v0.json")
-    with open(out, "w", encoding="utf-8") as fh:
+    # newline="\n": write LF regardless of host OS, so the signed byte digest is
+    # stable and matches the repo (git normalises to LF via .gitattributes).
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(corpus, fh, indent=2, ensure_ascii=False)
         fh.write("\n")
     print(f"wrote {out}")

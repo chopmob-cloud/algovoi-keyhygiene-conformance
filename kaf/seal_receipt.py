@@ -131,13 +131,13 @@ def main() -> int:
 
     out = os.path.join(HERE, "kaf", "receipts", f"{corpus['name']}.seq{args.seq}.receipt.json")
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", encoding="utf-8") as fh:
+    with open(out, "w", encoding="utf-8", newline="\n") as fh:
         json.dump(receipt, fh, indent=2)
         fh.write("\n")
 
     keys_dir = os.path.join(HERE, "kaf", "keys")
     os.makedirs(keys_dir, exist_ok=True)
-    with open(os.path.join(keys_dir, "kaf-seal.pub.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(keys_dir, "kaf-seal.pub.json"), "w", encoding="utf-8", newline="\n") as fh:
         json.dump(receipt["seal"]["jwk"], fh, indent=2)
         fh.write("\n")
 

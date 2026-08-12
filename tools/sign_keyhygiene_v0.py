@@ -93,9 +93,9 @@ def main() -> int:
     assert digest(json.loads(open(CORPUS, "rb").read())) == head["corpus_digest"], "digest drift"
     assert log.verify(), "provenance chain does not verify"
 
-    json.dump(manifest, open(os.path.join(CORPUS_DIR, "keyhygiene_v0.manifest.json"), "w", encoding="utf-8"), indent=2)
+    json.dump(manifest, open(os.path.join(CORPUS_DIR, "keyhygiene_v0.manifest.json"), "w", encoding="utf-8", newline="\n"), indent=2)
     json.dump({"issuer_id": log.issuer_id, "records": log.records},
-              open(os.path.join(CORPUS_DIR, "keyhygiene_v0.provenance.json"), "w", encoding="utf-8"), indent=2)
+              open(os.path.join(CORPUS_DIR, "keyhygiene_v0.provenance.json"), "w", encoding="utf-8", newline="\n"), indent=2)
 
     print("signed corpus head:", CORPUS_ID, VERSION)
     print("  total_cases   ", head["total_cases"], head["section_counts"])
