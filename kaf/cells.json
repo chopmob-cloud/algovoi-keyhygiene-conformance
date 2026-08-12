@@ -1,0 +1,19 @@
+{
+  "framework": "KAF",
+  "axis": "Cells",
+  "description": "Hermetic per-language runtime cells for the keyhygiene battery. Each cell builds/installs its deps fresh in a pinned image and runs that language's runner against the one signed corpus, so the byte-for-byte verdict is shown to hold in a clean, independent runtime.",
+  "cells": [
+    { "id": "python-3.12-slim",  "lang": "python",     "image": "python:3.12-slim" },
+    { "id": "node-20-slim",      "lang": "typescript", "image": "node:20-slim" },
+    { "id": "go-1.23-bookworm",  "lang": "go",         "image": "golang:1.23-bookworm" },
+    { "id": "rust-1-slim",       "lang": "rust",       "image": "rust:1-slim-bookworm" },
+    { "id": "gcc-14-c",          "lang": "c",          "image": "gcc:14-bookworm" },
+    { "id": "temurin-17-java",   "lang": "java",       "image": "eclipse-temurin:17" },
+    { "id": "temurin-17-kotlin", "lang": "kotlin",     "image": "eclipse-temurin:17" },
+    { "id": "temurin-17-scala",  "lang": "scala",      "image": "eclipse-temurin:17" },
+    { "id": "dotnet-sdk-9.0",    "lang": "dotnet",     "image": "mcr.microsoft.com/dotnet/sdk:9.0" },
+    { "id": "ruby-3.2-slim",     "lang": "ruby",       "image": "ruby:3.2-slim" },
+    { "id": "php-8.3-cli",       "lang": "php",        "image": "php:8.3-cli" },
+    { "id": "elixir-1.16-otp26", "lang": "elixir",     "image": "elixir:1.16-otp-26" }
+  ]
+}
