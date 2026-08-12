@@ -281,6 +281,72 @@ fn rsa_verdict(n: &BigInt, e: i64) -> (bool, &'static str) {
     (true, "ok")
 }
 
+// Batch common-factor (Mining-your-Ps-and-Qs): per-key verdict is "shares a
+// prime with another key in the set". True iff there is some j != i with a
+// nontrivial common GCD 1 < gcd(n_i, n_j) < n_i. Ported from
+// oracle.batch_common_factor_verdicts.
+fn batch_common_factor_verdicts(moduli: &[BigInt]) -> Vec<bool> {
+    let mut out = Vec::with_capacity(moduli.len());
+    for (i, ni) in moduli.iter().enumerate() {
+        let mut shared = false;
+        for (j, nj) in moduli.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let g = ni.gcd(nj);
+            if g > BigInt::one() && &g < ni {
+                shared = true;
+                break;
+            }
+        }
+        out.push(shared);
+    }
+    out
+}
+
+// The three prime-order curves' domain parameters (p, a, b), copied EXACTLY from
+// oracle.EC_CURVES. p256/p384 use a = p - 3; secp256k1 uses a = 0, b = 7.
+fn hexbig(s: &str) -> BigInt {
+    BigInt::parse_bytes(s.as_bytes(), 16).unwrap_or_else(|| panic!("bad hex: {s}"))
+}
+
+fn ec_curve_params(curve: &str) -> (BigInt, BigInt, BigInt) {
+    match curve {
+        "p256" => (
+            hexbig("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
+            hexbig("ffffffff00000001000000000000000000000000fffffffffffffffffffffffc"),
+            hexbig("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"),
+        ),
+        "p384" => (
+            hexbig("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"),
+            hexbig("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc"),
+            hexbig("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef"),
+        ),
+        "secp256k1" => (
+            hexbig("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
+            BigInt::zero(),
+            big(7),
+        ),
+        other => panic!("unknown curve: {other}"),
+    }
+}
+
+// Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+// Reject out-of-range coordinates and off-curve points. Ported from
+// oracle.ec_key_verdict.
+fn ec_key_verdict(curve: &str, x: &BigInt, y: &BigInt) -> (bool, &'static str) {
+    let (p, a, b) = ec_curve_params(curve);
+    if x.is_negative() || *x >= p || y.is_negative() || *y >= p {
+        return (false, "coordinate_out_of_range");
+    }
+    let lhs = y * y;
+    let rhs = x * x * x + &a * x + &b;
+    if (lhs - rhs).mod_floor(&p) != BigInt::zero() {
+        return (false, "not_on_curve");
+    }
+    (true, "ok")
+}
+
 fn parse_int(s: &str) -> BigInt {
     BigInt::parse_bytes(s.as_bytes(), 10).unwrap_or_else(|| panic!("bad integer: {s}"))
 }
@@ -306,6 +372,8 @@ fn main() {
     let empty: Vec<serde_json::Value> = Vec::new();
     let primality = corpus["primality"].as_array().unwrap_or(&empty);
     let rsa = corpus["rsa_modulus_hygiene"].as_array().unwrap_or(&empty);
+    let batch = corpus["batch_common_factor"].as_array().unwrap_or(&empty);
+    let ec = corpus["ec_key_hygiene"].as_array().unwrap_or(&empty);
 
     let mut failures: Vec<String> = Vec::new();
 
@@ -335,7 +403,38 @@ fn main() {
         }
     }
 
-    let total = primality.len() + rsa.len();
+    let moduli: Vec<BigInt> = batch
+        .iter()
+        .map(|c| parse_int(c["n"].as_str().expect("batch n")))
+        .collect();
+    let verdicts = batch_common_factor_verdicts(&moduli);
+    for (i, c) in batch.iter().enumerate() {
+        let expect = c["shares_factor"].as_bool().expect("shares_factor");
+        let note = c["note"].as_str().unwrap_or("");
+        let got = verdicts[i];
+        if got != expect {
+            failures.push(format!(
+                "batch_common_factor[{i}] {note}: got shares={got} want {expect}"
+            ));
+        }
+    }
+
+    for (i, c) in ec.iter().enumerate() {
+        let curve = c["curve"].as_str().expect("ec curve");
+        let x = parse_int(c["x"].as_str().expect("ec x"));
+        let y = parse_int(c["y"].as_str().expect("ec y"));
+        let expect_valid = c["expect_valid"].as_bool().expect("expect_valid");
+        let reason = c["reason"].as_str().expect("ec reason");
+        let note = c["note"].as_str().unwrap_or("");
+        let (valid, got_reason) = ec_key_verdict(curve, &x, &y);
+        if valid != expect_valid || got_reason != reason {
+            failures.push(format!(
+                "ec_key_hygiene[{i}] {note}: got ({valid},{got_reason}) want ({expect_valid},{reason})"
+            ));
+        }
+    }
+
+    let total = primality.len() + rsa.len() + batch.len() + ec.len();
     if !failures.is_empty() {
         println!("FAIL: {}/{} cases diverged", failures.len(), total);
         for f in &failures {

@@ -239,6 +239,84 @@ public class Verify {
     }
 
     // -----------------------------------------------------------------------
+    // batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a set
+    // -----------------------------------------------------------------------
+
+    // For a SET of moduli, per-key verdict = shares a nontrivial common factor
+    // with another key in the set. Mirrors oracle.batch_common_factor_verdicts:
+    // key i is shared iff there exists j != i with 1 < gcd(n_i, n_j) < n_i.
+    private static boolean[] batchCommonFactorVerdicts(BigInteger[] moduli) {
+        boolean[] out = new boolean[moduli.length];
+        for (int i = 0; i < moduli.length; i++) {
+            boolean shared = false;
+            for (int j = 0; j < moduli.length; j++) {
+                if (i == j) continue;
+                BigInteger g = moduli[i].gcd(moduli[j]);
+                if (g.compareTo(ONE) > 0 && g.compareTo(moduli[i]) < 0) {
+                    shared = true;
+                    break;
+                }
+            }
+            out[i] = shared;
+        }
+        return out;
+    }
+
+    // -----------------------------------------------------------------------
+    // EC public-key hygiene: on-curve validation for prime-order NIST/SEC curves
+    // (P-256, P-384, secp256k1 all have cofactor 1). Curve (p, a, b) values are
+    // copied verbatim from oracle.EC_CURVES via new BigInteger(hex, 16).
+    // -----------------------------------------------------------------------
+
+    private static final class Curve {
+        final BigInteger p, a, b;
+        Curve(String p, String a, String b) {
+            this.p = new BigInteger(p, 16);
+            this.a = new BigInteger(a, 16);
+            this.b = new BigInteger(b, 16);
+        }
+    }
+
+    private static Curve curveFor(String name) {
+        switch (name) {
+            case "p256":
+                return new Curve(
+                    "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff",
+                    "ffffffff00000001000000000000000000000000fffffffffffffffffffffffc",
+                    "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b");
+            case "p384":
+                return new Curve(
+                    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff",
+                    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc",
+                    "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef");
+            case "secp256k1":
+                return new Curve(
+                    "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f",
+                    "0",
+                    "7");
+            default:
+                throw new IllegalArgumentException("unknown curve: " + name);
+        }
+    }
+
+    // Accept/reject an affine EC public point (x, y) on a named prime-order
+    // curve. Mirrors oracle.ec_key_verdict. Returns Object[]{validFlag, reason}.
+    private static Object[] ecKeyVerdict(String curveName, BigInteger x, BigInteger y) {
+        Curve c = curveFor(curveName);
+        BigInteger p = c.p, a = c.a, b = c.b;
+        if (x.signum() < 0 || x.compareTo(p) >= 0 || y.signum() < 0 || y.compareTo(p) >= 0) {
+            return new Object[]{false, "coordinate_out_of_range"};
+        }
+        // y^2 - (x^3 + a*x + b) mod p; BigInteger.mod is already non-negative.
+        BigInteger rhs = x.pow(3).add(a.multiply(x)).add(b);
+        BigInteger lhs = y.multiply(y);
+        if (lhs.subtract(rhs).mod(p).signum() != 0) {
+            return new Object[]{false, "not_on_curve"};
+        }
+        return new Object[]{true, "ok"};
+    }
+
+    // -----------------------------------------------------------------------
     // driver
     // -----------------------------------------------------------------------
 
@@ -282,7 +360,44 @@ public class Verify {
             }
         }
 
-        int total = primCount + rsaCount;
+        JSONArray batch = corpus.optJSONArray("batch_common_factor");
+        int batchCount = (batch == null) ? 0 : batch.length();
+        if (batchCount > 0) {
+            BigInteger[] moduli = new BigInteger[batchCount];
+            for (int i = 0; i < batchCount; i++) {
+                moduli[i] = new BigInteger(batch.getJSONObject(i).getString("n"));
+            }
+            boolean[] verdicts = batchCommonFactorVerdicts(moduli);
+            for (int i = 0; i < batchCount; i++) {
+                JSONObject c = batch.getJSONObject(i);
+                boolean got = verdicts[i];
+                boolean want = c.getBoolean("shares_factor");
+                if (got != want) {
+                    failures.add(String.format("batch_common_factor[%d] %s: got shares=%b want %b",
+                            i, c.optString("note"), got, want));
+                }
+            }
+        }
+
+        JSONArray ec = corpus.optJSONArray("ec_key_hygiene");
+        int ecCount = (ec == null) ? 0 : ec.length();
+        for (int i = 0; i < ecCount; i++) {
+            JSONObject c = ec.getJSONObject(i);
+            Object[] verdict = ecKeyVerdict(
+                    c.getString("curve"),
+                    new BigInteger(c.getString("x")),
+                    new BigInteger(c.getString("y")));
+            boolean valid = (Boolean) verdict[0];
+            String reason = (String) verdict[1];
+            boolean wantValid = c.getBoolean("expect_valid");
+            String wantReason = c.getString("reason");
+            if (valid != wantValid || !reason.equals(wantReason)) {
+                failures.add(String.format("ec_key_hygiene[%d] %s: got (%b,%s) want (%b,%s)",
+                        i, c.optString("note"), valid, reason, wantValid, wantReason));
+            }
+        }
+
+        int total = primCount + rsaCount + batchCount + ecCount;
         if (!failures.isEmpty()) {
             System.out.printf("FAIL: %d/%d cases diverged%n", failures.size(), total);
             int shown = Math.min(failures.size(), 20);

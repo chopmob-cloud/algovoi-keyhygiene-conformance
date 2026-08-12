@@ -238,6 +238,79 @@ internal static class Program
     }
 
     // ---------------------------------------------------------------------
+    // batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a set
+    // ---------------------------------------------------------------------
+
+    // Per-key verdict for a SET of moduli: True iff the key shares a nontrivial
+    // prime with SOME other key in the set (1 < gcd(n_i, n_j) < n_i). Such keys
+    // are trivially factorable by anyone holding the set. Mirrors
+    // oracle.batch_common_factor_verdicts.
+    private static List<bool> BatchCommonFactorVerdicts(List<BigInteger> moduli)
+    {
+        var outp = new List<bool>(moduli.Count);
+        for (int i = 0; i < moduli.Count; i++)
+        {
+            bool shared = false;
+            for (int j = 0; j < moduli.Count; j++)
+            {
+                if (i == j) continue;
+                BigInteger g = BigInteger.GreatestCommonDivisor(moduli[i], moduli[j]);
+                if (g > 1 && g < moduli[i]) { shared = true; break; }
+            }
+            outp.Add(shared);
+        }
+        return outp;
+    }
+
+    // ---------------------------------------------------------------------
+    // EC public-key hygiene: on-curve validation for prime-order NIST/SEC curves
+    // (P-256, P-384, secp256k1 all have cofactor 1: on-curve + in-range is
+    // sufficient). Curve (p, a, b) copied EXACTLY from oracle.EC_CURVES.
+    // ---------------------------------------------------------------------
+
+    // BigInteger.Parse of a hex literal sign-extends when the high nibble has the
+    // top bit set, so every hex constant is prefixed with "0" to force a positive
+    // value (mirroring oracle's unsigned 0x... literals).
+    private static BigInteger Hex(string h) =>
+        BigInteger.Parse("0" + h, System.Globalization.NumberStyles.HexNumber);
+
+    private readonly struct Curve
+    {
+        public readonly BigInteger P;
+        public readonly BigInteger A;
+        public readonly BigInteger B;
+        public Curve(BigInteger p, BigInteger a, BigInteger b) { P = p; A = a; B = b; }
+    }
+
+    private static readonly Dictionary<string, Curve> EcCurves = new()
+    {
+        ["p256"] = new Curve(
+            Hex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
+            Hex("ffffffff00000001000000000000000000000000fffffffffffffffffffffffc"),
+            Hex("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b")),
+        ["p384"] = new Curve(
+            Hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"),
+            Hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc"),
+            Hex("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef")),
+        ["secp256k1"] = new Curve(
+            Hex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
+            BigInteger.Zero,
+            new BigInteger(7)),
+    };
+
+    // Nonnegative modulo: BigInteger % can be negative, so normalize.
+    private static BigInteger NonNegMod(BigInteger v, BigInteger p) => ((v % p) + p) % p;
+
+    private static (bool valid, string reason) EcKeyVerdict(string curve, BigInteger x, BigInteger y)
+    {
+        Curve c = EcCurves[curve];
+        BigInteger p = c.P, a = c.A, b = c.B;
+        if (x < 0 || x >= p || y < 0 || y >= p) return (false, "coordinate_out_of_range");
+        if (NonNegMod(y * y - (x * x * x + a * x + b), p) != 0) return (false, "not_on_curve");
+        return (true, "ok");
+    }
+
+    // ---------------------------------------------------------------------
     // driver
     // ---------------------------------------------------------------------
 
@@ -296,9 +369,45 @@ internal static class Program
             }
         }
 
+        if (root.TryGetProperty("batch_common_factor", out JsonElement batch))
+        {
+            var cases = batch.EnumerateArray().ToList();
+            var moduli = cases.Select(c => BigInteger.Parse(c.GetProperty("n").GetString()!)).ToList();
+            var verdicts = BatchCommonFactorVerdicts(moduli);
+            for (int i = 0; i < cases.Count; i++)
+            {
+                JsonElement c = cases[i];
+                string note = c.TryGetProperty("note", out var nt) ? (nt.GetString() ?? "") : "";
+                bool expect = c.GetProperty("shares_factor").GetBoolean();
+                bool got = verdicts[i];
+                if (got != expect)
+                    failures.Add($"batch_common_factor[{i}] {note}: got shares={got} want {expect}");
+            }
+        }
+
+        if (root.TryGetProperty("ec_key_hygiene", out JsonElement ec))
+        {
+            int i = 0;
+            foreach (JsonElement c in ec.EnumerateArray())
+            {
+                string note = c.TryGetProperty("note", out var nt) ? (nt.GetString() ?? "") : "";
+                string curve = c.GetProperty("curve").GetString()!;
+                BigInteger x = BigInteger.Parse(c.GetProperty("x").GetString()!);
+                BigInteger y = BigInteger.Parse(c.GetProperty("y").GetString()!);
+                bool expectValid = c.GetProperty("expect_valid").GetBoolean();
+                string reason = c.GetProperty("reason").GetString() ?? "";
+                var (valid, gotReason) = EcKeyVerdict(curve, x, y);
+                if (valid != expectValid || gotReason != reason)
+                    failures.Add($"ec_key_hygiene[{i}] {note}: got ({valid},{gotReason}) want ({expectValid},{reason})");
+                i++;
+            }
+        }
+
         int total = 0;
         if (root.TryGetProperty("primality", out var p2)) total += p2.GetArrayLength();
         if (root.TryGetProperty("rsa_modulus_hygiene", out var r2)) total += r2.GetArrayLength();
+        if (root.TryGetProperty("batch_common_factor", out var b2)) total += b2.GetArrayLength();
+        if (root.TryGetProperty("ec_key_hygiene", out var e2)) total += e2.GetArrayLength();
 
         if (failures.Count > 0)
         {

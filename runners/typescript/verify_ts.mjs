@@ -169,6 +169,64 @@ function rsaVerdict(n, e) {
   return [true, "ok"];
 }
 
+// ---------------------------------------------------------------------------
+// batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a key set
+// ---------------------------------------------------------------------------
+
+function gcd(a, b) {
+  while (b) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+function batchCommonFactorVerdicts(moduli) {
+  const out = [];
+  for (let i = 0; i < moduli.length; i++) {
+    const ni = moduli[i];
+    let shared = false;
+    for (let j = 0; j < moduli.length; j++) {
+      if (i === j) continue;
+      const g = gcd(ni, moduli[j]);
+      if (g > 1n && g < ni) { shared = true; break; }
+    }
+    out.push(shared);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// EC public-key hygiene: on-curve validation for the prime-order NIST/SEC curves.
+// (p,a,b) copied EXACTLY from oracle.EC_CURVES; non-negative modulo throughout.
+// ---------------------------------------------------------------------------
+
+const EC_CURVES = {
+  p256: {
+    p: 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffffn,
+    a: 0xffffffff00000001000000000000000000000000fffffffffffffffffffffffcn,
+    b: 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604bn,
+  },
+  p384: {
+    p: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffffn,
+    a: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffcn,
+    b: 0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aefn,
+  },
+  secp256k1: {
+    p: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2fn,
+    a: 0n,
+    b: 7n,
+  },
+};
+
+function ecKeyVerdict(curve, x, y) {
+  const { p, a, b } = EC_CURVES[curve];
+  if (x < 0n || x >= p || y < 0n || y >= p) return [false, "coordinate_out_of_range"];
+  const lhs = ((y * y) % p + p) % p;
+  const rhs = ((x * x * x + a * x + b) % p + p) % p;
+  if (((lhs - rhs) % p + p) % p !== 0n) return [false, "not_on_curve"];
+  return [true, "ok"];
+}
+
 function main() {
   const path = process.argv[2] || process.env.ALGOVOI_KEYHYGIENE;
   const corpus = JSON.parse(readFileSync(path, "utf-8"));
@@ -184,7 +242,23 @@ function main() {
       failures.push(`rsa[${i}] ${c.note}: got (${accept},${reason}) want (${c.expect_accept},${c.reason})`);
   });
 
-  const total = (corpus.primality || []).length + (corpus.rsa_modulus_hygiene || []).length;
+  const batch = corpus.batch_common_factor || [];
+  if (batch.length) {
+    const moduli = batch.map((c) => BigInt(c.n));
+    const verdicts = batchCommonFactorVerdicts(moduli);
+    batch.forEach((c, i) => {
+      if (verdicts[i] !== c.shares_factor)
+        failures.push(`batch_common_factor[${i}] ${c.note}: got shares=${verdicts[i]} want ${c.shares_factor}`);
+    });
+  }
+  (corpus.ec_key_hygiene || []).forEach((c, i) => {
+    const [valid, reason] = ecKeyVerdict(c.curve, BigInt(c.x), BigInt(c.y));
+    if (valid !== c.expect_valid || reason !== c.reason)
+      failures.push(`ec_key_hygiene[${i}] ${c.note}: got (${valid},${reason}) want (${c.expect_valid},${c.reason})`);
+  });
+
+  const total = (corpus.primality || []).length + (corpus.rsa_modulus_hygiene || []).length
+    + (corpus.batch_common_factor || []).length + (corpus.ec_key_hygiene || []).length;
   if (failures.length) {
     console.log(`FAIL: ${failures.length}/${total} cases diverged`);
     failures.slice(0, 20).forEach((f) => console.log("  -", f));

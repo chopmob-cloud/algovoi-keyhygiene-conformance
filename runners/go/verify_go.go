@@ -27,6 +27,19 @@ type corpus struct {
 		Reason       string `json:"reason"`
 		Note         string `json:"note"`
 	} `json:"rsa_modulus_hygiene"`
+	Batch []struct {
+		N            string `json:"n"`
+		SharesFactor bool   `json:"shares_factor"`
+		Note         string `json:"note"`
+	} `json:"batch_common_factor"`
+	EC []struct {
+		Curve       string `json:"curve"`
+		X           string `json:"x"`
+		Y           string `json:"y"`
+		ExpectValid bool   `json:"expect_valid"`
+		Reason      string `json:"reason"`
+		Note        string `json:"note"`
+	} `json:"ec_key_hygiene"`
 }
 
 var (
@@ -152,6 +165,80 @@ func rsaVerdict(n *big.Int, e int64) (bool, string) {
 	return true, "ok"
 }
 
+// batchCommonFactorVerdicts mirrors oracle.batch_common_factor_verdicts: per-key
+// verdict is true iff the key shares a nontrivial prime with another key in the
+// set (1 < gcd(n_i, n_j) < n_i for some j != i).
+func batchCommonFactorVerdicts(moduli []*big.Int) []bool {
+	out := make([]bool, len(moduli))
+	g := new(big.Int)
+	for i, ni := range moduli {
+		shared := false
+		for j, nj := range moduli {
+			if i == j {
+				continue
+			}
+			g.GCD(nil, nil, ni, nj)
+			if g.Cmp(one) > 0 && g.Cmp(ni) < 0 {
+				shared = true
+				break
+			}
+		}
+		out[i] = shared
+	}
+	return out
+}
+
+// ecCurve holds (p, a, b) copied EXACTLY from oracle.EC_CURVES.
+type ecCurve struct{ p, a, b *big.Int }
+
+func mustHex(s string) *big.Int {
+	n, ok := new(big.Int).SetString(s, 16)
+	if !ok {
+		panic("bad hex: " + s)
+	}
+	return n
+}
+
+var ecCurves = map[string]ecCurve{
+	"p256": {
+		p: mustHex("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff"),
+		a: mustHex("ffffffff00000001000000000000000000000000fffffffffffffffffffffffc"),
+		b: mustHex("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b"),
+	},
+	"p384": {
+		p: mustHex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff"),
+		a: mustHex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc"),
+		b: mustHex("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef"),
+	},
+	"secp256k1": {
+		p: mustHex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f"),
+		a: big.NewInt(0),
+		b: big.NewInt(7),
+	},
+}
+
+// ecKeyVerdict mirrors oracle.ec_key_verdict: in-range then on-curve check over
+// the prime field. big.Int.Mod is non-negative for a positive modulus.
+func ecKeyVerdict(curve string, x, y *big.Int) (bool, string) {
+	c := ecCurves[curve]
+	p, a, b := c.p, c.a, c.b
+	if x.Sign() < 0 || x.Cmp(p) >= 0 || y.Sign() < 0 || y.Cmp(p) >= 0 {
+		return false, "coordinate_out_of_range"
+	}
+	// lhs = y*y ; rhs = x^3 + a*x + b
+	lhs := new(big.Int).Mul(y, y)
+	rhs := new(big.Int).Mul(x, x)
+	rhs.Mul(rhs, x)
+	ax := new(big.Int).Mul(a, x)
+	rhs.Add(rhs, ax)
+	rhs.Add(rhs, b)
+	diff := new(big.Int).Sub(lhs, rhs)
+	if diff.Mod(diff, p).Sign() != 0 {
+		return false, "not_on_curve"
+	}
+	return true, "ok"
+}
+
 func main() {
 	path := ""
 	if len(os.Args) > 1 {
@@ -184,7 +271,26 @@ func main() {
 		}
 	}
 
-	total := len(c.Primality) + len(c.RSA)
+	if len(c.Batch) > 0 {
+		moduli := make([]*big.Int, len(c.Batch))
+		for i, cs := range c.Batch {
+			moduli[i] = mustInt(cs.N)
+		}
+		verdicts := batchCommonFactorVerdicts(moduli)
+		for i, cs := range c.Batch {
+			if verdicts[i] != cs.SharesFactor {
+				failures = append(failures, fmt.Sprintf("batch_common_factor[%d] %s: got shares=%v want %v", i, cs.Note, verdicts[i], cs.SharesFactor))
+			}
+		}
+	}
+	for i, cs := range c.EC {
+		valid, reason := ecKeyVerdict(cs.Curve, mustInt(cs.X), mustInt(cs.Y))
+		if valid != cs.ExpectValid || reason != cs.Reason {
+			failures = append(failures, fmt.Sprintf("ec_key_hygiene[%d] %s: got (%v,%s) want (%v,%s)", i, cs.Note, valid, reason, cs.ExpectValid, cs.Reason))
+		}
+	}
+
+	total := len(c.Primality) + len(c.RSA) + len(c.Batch) + len(c.EC)
 	if len(failures) > 0 {
 		fmt.Printf("FAIL: %d/%d cases diverged\n", len(failures), total)
 		for _, f := range failures {

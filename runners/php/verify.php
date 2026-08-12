@@ -299,6 +299,98 @@ function rsa_modulus_verdict(GMP $n, int $e): array
 }
 
 // ---------------------------------------------------------------------------
+// batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a key set
+// ---------------------------------------------------------------------------
+
+/**
+ * For a SET of RSA moduli, per-key verdict = shares a prime with another key in
+ * the set (a nontrivial common GCD). Mirrors oracle.batch_common_factor_verdicts:
+ * verdict[i] is true iff there exists j != i with 1 < gcd(n_i, n_j) < n_i.
+ * Returns an array of bool aligned to the input order.
+ *
+ * @param GMP[] $moduli
+ * @return bool[]
+ */
+function batch_common_factor_verdicts(array $moduli): array
+{
+    $out = [];
+    $count = count($moduli);
+    for ($i = 0; $i < $count; $i++) {
+        $ni = $moduli[$i];
+        $shared = false;
+        for ($j = 0; $j < $count; $j++) {
+            if ($i === $j) {
+                continue;
+            }
+            $g = gmp_gcd($ni, $moduli[$j]);
+            if (gmp_cmp($g, 1) > 0 && gmp_cmp($g, $ni) < 0) {
+                $shared = true;
+                break;
+            }
+        }
+        $out[] = $shared;
+    }
+    return $out;
+}
+
+// ---------------------------------------------------------------------------
+// EC public-key hygiene: on-curve validation for the prime-order NIST/SEC curves
+// (P-256, P-384, secp256k1 all have cofactor 1, so on-curve + in-range is
+// sufficient). Curve (p, a, b) parameters are copied verbatim from
+// oracle.EC_CURVES (p256/p384: a = p-3; secp256k1: a = 0, b = 7).
+// ---------------------------------------------------------------------------
+
+/** Named prime-order curves: p, a, b exactly as oracle.EC_CURVES. */
+function ec_curves(): array
+{
+    static $curves = null;
+    if ($curves === null) {
+        $curves = [
+            'p256' => [
+                'p' => gmp_init('0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff', 16),
+                'a' => gmp_init('0xffffffff00000001000000000000000000000000fffffffffffffffffffffffc', 16),
+                'b' => gmp_init('0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b', 16),
+            ],
+            'p384' => [
+                'p' => gmp_init('0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff', 16),
+                'a' => gmp_init('0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc', 16),
+                'b' => gmp_init('0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef', 16),
+            ],
+            'secp256k1' => [
+                'p' => gmp_init('0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f', 16),
+                'a' => gmp_init(0),
+                'b' => gmp_init(7),
+            ],
+        ];
+    }
+    return $curves;
+}
+
+/**
+ * Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+ * Mirrors oracle.ec_key_verdict: reject out-of-range coordinates and off-curve
+ * points. gmp_mod returns a non-negative residue, matching Python's %.
+ * Returns [valid, reason].
+ */
+function ec_key_verdict(string $curve, GMP $x, GMP $y): array
+{
+    $c = ec_curves()[$curve];
+    $p = $c['p'];
+    $a = $c['a'];
+    $b = $c['b'];
+    if (gmp_cmp($x, 0) < 0 || gmp_cmp($x, $p) >= 0 || gmp_cmp($y, 0) < 0 || gmp_cmp($y, $p) >= 0) {
+        return [false, 'coordinate_out_of_range'];
+    }
+    // y^2 - (x^3 + a*x + b) mod p
+    $lhs = gmp_mul($y, $y);
+    $rhs = gmp_add(gmp_add(gmp_pow($x, 3), gmp_mul($a, $x)), $b);
+    if (gmp_cmp(gmp_mod(gmp_sub($lhs, $rhs), $p), 0) !== 0) {
+        return [false, 'not_on_curve'];
+    }
+    return [true, 'ok'];
+}
+
+// ---------------------------------------------------------------------------
 // driver
 // ---------------------------------------------------------------------------
 
@@ -352,7 +444,47 @@ function main(array $argv): int
         }
     }
 
-    $total = count($primality) + count($rsa);
+    $batch = $corpus['batch_common_factor'] ?? [];
+    if (count($batch) > 0) {
+        $moduli = [];
+        foreach ($batch as $c) {
+            $moduli[] = gmp_init((string) $c['n'], 10);
+        }
+        $verdicts = batch_common_factor_verdicts($moduli);
+        foreach ($batch as $i => $c) {
+            if ($verdicts[$i] !== (bool) $c['shares_factor']) {
+                $failures[] = sprintf(
+                    "batch_common_factor[%d] %s: got shares=%s want %s",
+                    $i,
+                    $c['note'] ?? '',
+                    $verdicts[$i] ? 'true' : 'false',
+                    $c['shares_factor'] ? 'true' : 'false'
+                );
+            }
+        }
+    }
+
+    $ec = $corpus['ec_key_hygiene'] ?? [];
+    foreach ($ec as $i => $c) {
+        [$valid, $reason] = ec_key_verdict(
+            (string) $c['curve'],
+            gmp_init((string) $c['x'], 10),
+            gmp_init((string) $c['y'], 10)
+        );
+        if ($valid !== (bool) $c['expect_valid'] || $reason !== $c['reason']) {
+            $failures[] = sprintf(
+                "ec_key_hygiene[%d] %s: got (%s,%s) want (%s,%s)",
+                $i,
+                $c['note'] ?? '',
+                $valid ? 'true' : 'false',
+                $reason,
+                $c['expect_valid'] ? 'true' : 'false',
+                $c['reason']
+            );
+        }
+    }
+
+    $total = count($primality) + count($rsa) + count($batch) + count($ec);
     if (count($failures) > 0) {
         printf("FAIL: %d/%d cases diverged\n", count($failures), $total);
         foreach (array_slice($failures, 0, 20) as $f) {

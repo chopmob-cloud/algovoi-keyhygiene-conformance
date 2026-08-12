@@ -27,12 +27,14 @@ It is deliberately **not** payment-specific: the primitives (primality, RSA
 modulus hygiene) sit under every PKI, so the battery reaches the RSA-dominant
 regulated industries (CAs, eIDAS, HSM/TPM, government identity, TLS/PKI audit).
 
-## The sections (v0)
+## The sections
 
 | Section | Each case | Verdict |
 |---|---|---|
 | `primality` | a candidate integer (decimal string) | prime? (Baillie-PSW ground truth) |
 | `rsa_modulus_hygiene` | an RSA public key `(n, e)` | accept / reject + reason, under the CA/Browser-Forum-tracking policy |
+| `batch_common_factor` | a **set** of RSA moduli | per key: shares a prime with another key? (batch-GCD) |
+| `ec_key_hygiene` | an affine EC point `(curve, x, y)` | on-curve + in-range? (P-256, P-384, secp256k1) |
 
 `primality` carries the adversarial core: composites that are **strong
 pseudoprimes** to a target base set, so a checker using Miller-Rabin over those
@@ -43,6 +45,15 @@ test.
 `rsa_modulus_hygiene` rejects perfect-power moduli, small-factor moduli,
 close-prime (Fermat-factorable) moduli, disallowed bit lengths, and disallowed
 public exponents; it accepts valid 2048/3072/4096-bit moduli.
+
+`batch_common_factor` models the Mining-your-Ps-and-Qs failure: some keys in the
+set share a prime, so anyone holding the set factors them by a GCD. Shared keys
+carry the shared prime, so the corpus proves the co-factor independently.
+
+`ec_key_hygiene` validates EC public points: coordinates in `[0, p)` and on the
+curve `y² ≡ x³ + ax + b (mod p)`. These curves have cofactor 1, so on-curve plus
+in-range is sufficient (there is no small-order subgroup to screen, unlike the
+cofactor-8 Edwards keygate in the sibling RFC 9421 battery).
 
 ## The differential has teeth
 
@@ -93,8 +104,8 @@ stdlib primality shortcut):
 | C | GMP | Ruby | `Integer` |
 | Elixir | native | PHP | GMP |
 
-Latest sealed run: **32 cases, full 12-way consensus, 12/12 hermetic cells PASS**
-(`kaf/receipts/keyhygiene_v0.seq1.receipt.json`).
+Latest sealed run: **53 cases across four sections, full 12-way consensus, 12/12
+hermetic cells PASS** (`kaf/receipts/keyhygiene_v0.seq1.receipt.json`).
 
 ## Security scope (defensive only)
 

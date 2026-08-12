@@ -11,6 +11,13 @@
  *   - RSA hygiene: perfect power, small-factor trial division, bounded Fermat
  *                 close-prime factorisation, bit-length and public-exponent
  *                 policy, in the exact reject-reason order oracle.py uses.
+ *   - batch common-factor: per-key verdict over a modulus SET (shares a prime
+ *                 with another key iff 1 < gcd < n_i), the Mining-Ps-and-Qs
+ *                 class; mirrors oracle.batch_common_factor_verdicts.
+ *   - EC hygiene: affine on-curve + coordinate-range validation for the
+ *                 prime-order curves p256, p384, secp256k1 (domain params
+ *                 copied verbatim from oracle.EC_CURVES); mirrors
+ *                 oracle.ec_key_verdict.
  *
  * Reads the frozen corpus and reproduces every verdict; exits 0 iff all match.
  *
@@ -347,6 +354,105 @@ static int rsa_verdict(const mpz_t n, long e, const char **reason)
 }
 
 /* ------------------------------------------------------------------------- */
+/* batch common-factor (Mining-your-Ps-and-Qs)                               */
+/* ------------------------------------------------------------------------- */
+
+/* Per-key verdict over a SET of moduli: key i "shares a factor" iff there is
+ * some j != i with a nontrivial common GCD, i.e. 1 < gcd(n_i, n_j) < n_i.
+ * Mirrors oracle.batch_common_factor_verdicts. `ns` holds all moduli; `count`
+ * is the set size; result is the boolean verdict for index `idx`. */
+static int batch_shares_factor(const mpz_t *ns, size_t count, size_t idx)
+{
+    mpz_t g;
+    mpz_init(g);
+    int shared = 0;
+    for (size_t j = 0; j < count; j++) {
+        if (j == idx)
+            continue;
+        mpz_gcd(g, ns[idx], ns[j]);
+        /* 1 < g < n_i */
+        if (mpz_cmp_ui(g, 1) > 0 && mpz_cmp(g, ns[idx]) < 0) {
+            shared = 1;
+            break;
+        }
+    }
+    mpz_clear(g);
+    return shared;
+}
+
+/* ------------------------------------------------------------------------- */
+/* EC public-key hygiene: on-curve validation for prime-order NIST/SEC curves */
+/* ------------------------------------------------------------------------- */
+
+/* Curve domain parameters (p, a, b), hex copied verbatim from oracle.EC_CURVES.
+ * p256/p384 use a = p-3; secp256k1 uses a = 0, b = 7. */
+static int ec_curve_params(const char *curve, mpz_t p, mpz_t a, mpz_t b)
+{
+    if (curve && strcmp(curve, "p256") == 0) {
+        mpz_set_str(p, "ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 16);
+        mpz_set_str(a, "ffffffff00000001000000000000000000000000fffffffffffffffffffffffc", 16);
+        mpz_set_str(b, "5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b", 16);
+        return 1;
+    }
+    if (curve && strcmp(curve, "p384") == 0) {
+        mpz_set_str(p, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff", 16);
+        mpz_set_str(a, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc", 16);
+        mpz_set_str(b, "b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef", 16);
+        return 1;
+    }
+    if (curve && strcmp(curve, "secp256k1") == 0) {
+        mpz_set_str(p, "fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16);
+        mpz_set_str(a, "0", 16);
+        mpz_set_str(b, "7", 16);
+        return 1;
+    }
+    return 0;
+}
+
+/* Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+ * Reject out-of-range coordinates and off-curve points, in oracle.ec_key_verdict
+ * order. Returns 1 (valid) or 0 (invalid); *reason points at a static string. */
+static int ec_verdict(const char *curve, const mpz_t x, const mpz_t y, const char **reason)
+{
+    mpz_t p, a, b, lhs, rhs, t;
+    mpz_inits(p, a, b, lhs, rhs, t, NULL);
+    if (!ec_curve_params(curve, p, a, b)) {
+        mpz_clears(p, a, b, lhs, rhs, t, NULL);
+        *reason = "unknown_curve";
+        return 0;
+    }
+
+    int valid;
+    /* x < 0 || x >= p || y < 0 || y >= p */
+    if (mpz_sgn(x) < 0 || mpz_cmp(x, p) >= 0 || mpz_sgn(y) < 0 || mpz_cmp(y, p) >= 0) {
+        *reason = "coordinate_out_of_range";
+        valid = 0;
+    } else {
+        /* rhs = x^3 + a*x + b */
+        mpz_mul(rhs, x, x);
+        mpz_mul(rhs, rhs, x); /* x^3 */
+        mpz_mul(t, a, x);
+        mpz_add(rhs, rhs, t);
+        mpz_add(rhs, rhs, b);
+        /* lhs = y^2 */
+        mpz_mul(lhs, y, y);
+        /* (y^2 - (x^3 + a*x + b)) mod p, non-negative */
+        mpz_sub(t, lhs, rhs);
+        mpz_mod(t, t, p);
+        if (mpz_sgn(t) != 0) {
+            *reason = "not_on_curve";
+            valid = 0;
+        } else {
+            *reason = "ok";
+            valid = 1;
+        }
+    }
+
+    mpz_clears(p, a, b, lhs, rhs, t, NULL);
+    return valid;
+}
+
+/* ------------------------------------------------------------------------- */
 /* driver                                                                    */
 /* ------------------------------------------------------------------------- */
 
@@ -416,6 +522,75 @@ int main(int argc, char **argv)
         else
             fprintf(stderr, "rsa[%zu] %s: got (%d,%s) want (%d,%s)\n",
                     i, note ? note : "", accept, reason, expect_accept,
+                    want_reason ? want_reason : "");
+    }
+
+    json_t *batch = json_object_get(root, "batch_common_factor");
+    if (json_is_array(batch)) {
+        size_t count = json_array_size(batch);
+        mpz_t *ns = (mpz_t *)malloc(count * sizeof(mpz_t));
+        if (count > 0 && !ns) {
+            fprintf(stderr, "batch: out of memory for %zu moduli\n", count);
+            json_decref(root);
+            return 2;
+        }
+        /* read ALL moduli first (verdict for key i depends on the whole set) */
+        for (i = 0; i < count; i++) {
+            el = json_array_get(batch, i);
+            const char *ns_str = json_string_value(json_object_get(el, "n"));
+            mpz_init(ns[i]);
+            if (mpz_set_str(ns[i], ns_str ? ns_str : "", 10) != 0) {
+                fprintf(stderr, "batch[%zu]: bad integer '%s'\n", i, ns_str ? ns_str : "");
+                for (size_t k = 0; k <= i; k++)
+                    mpz_clear(ns[k]);
+                free(ns);
+                json_decref(root);
+                return 2;
+            }
+        }
+        for (i = 0; i < count; i++) {
+            el = json_array_get(batch, i);
+            const char *note = json_string_value(json_object_get(el, "note"));
+            int expect = json_is_true(json_object_get(el, "shares_factor"));
+            int got = batch_shares_factor((const mpz_t *)ns, count, i) ? 1 : 0;
+            total++;
+            if (got == expect)
+                matched++;
+            else
+                fprintf(stderr, "batch_common_factor[%zu] %s: got shares=%d want %d\n",
+                        i, note ? note : "", got, expect);
+        }
+        for (i = 0; i < count; i++)
+            mpz_clear(ns[i]);
+        free(ns);
+    }
+
+    json_t *ec = json_object_get(root, "ec_key_hygiene");
+    json_array_foreach(ec, i, el) {
+        const char *curve = json_string_value(json_object_get(el, "curve"));
+        const char *xs = json_string_value(json_object_get(el, "x"));
+        const char *ys = json_string_value(json_object_get(el, "y"));
+        const char *note = json_string_value(json_object_get(el, "note"));
+        const char *want_reason = json_string_value(json_object_get(el, "reason"));
+        int expect_valid = json_is_true(json_object_get(el, "expect_valid"));
+        mpz_t x, y;
+        mpz_inits(x, y, NULL);
+        if (mpz_set_str(x, xs ? xs : "", 10) != 0 || mpz_set_str(y, ys ? ys : "", 10) != 0) {
+            fprintf(stderr, "ec[%zu]: bad coordinate x='%s' y='%s'\n",
+                    i, xs ? xs : "", ys ? ys : "");
+            mpz_clears(x, y, NULL);
+            json_decref(root);
+            return 2;
+        }
+        const char *reason = "";
+        int valid = ec_verdict(curve, x, y, &reason);
+        mpz_clears(x, y, NULL);
+        total++;
+        if (valid == expect_valid && want_reason && strcmp(reason, want_reason) == 0)
+            matched++;
+        else
+            fprintf(stderr, "ec_key_hygiene[%zu] %s: got (%d,%s) want (%d,%s)\n",
+                    i, note ? note : "", valid, reason, expect_valid,
                     want_reason ? want_reason : "");
     }
 

@@ -19,6 +19,8 @@ PY="$(command -v python3 || command -v python || true)"
 MUTATIONS=(
   "primality:0:expect_prime:flip"            # lie about a primality verdict
   "rsa_modulus_hygiene:0:expect_accept:flip" # lie about an RSA accept
+  "batch_common_factor:0:shares_factor:flip" # lie about a shared-factor verdict
+  "ec_key_hygiene:0:expect_valid:flip"       # lie about an on-curve verdict
 )
 
 mutate() {

@@ -207,6 +207,67 @@ def rsa_modulus_verdict(n, e)
 end
 
 # ---------------------------------------------------------------------------
+# batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a key set
+# ---------------------------------------------------------------------------
+
+# For a SET of RSA moduli, per-key verdict = shares a prime with another key in
+# the set (a nontrivial common GCD). Mirrors oracle.batch_common_factor_verdicts.
+# Verdict[i] is true iff there exists j != i with 1 < gcd(n_i, n_j) < n_i.
+def batch_common_factor_verdicts(moduli)
+  moduli.each_index.map do |i|
+    ni = moduli[i]
+    shared = false
+    moduli.each_index do |j|
+      next if i == j
+
+      g = ni.gcd(moduli[j])
+      if g > 1 && g < ni
+        shared = true
+        break
+      end
+    end
+    shared
+  end
+end
+
+# ---------------------------------------------------------------------------
+# EC public-key hygiene: on-curve validation for the prime-order NIST/SEC curves
+# (P-256, P-384, secp256k1 all have cofactor 1). Curve (p, a, b) values copied
+# byte-for-byte from oracle.EC_CURVES.
+# ---------------------------------------------------------------------------
+
+EC_CURVES = {
+  'p256' => {
+    p: 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff,
+    a: 0xffffffff00000001000000000000000000000000fffffffffffffffffffffffc,
+    b: 0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b
+  },
+  'p384' => {
+    p: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff,
+    a: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc,
+    b: 0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef
+  },
+  'secp256k1' => {
+    p: 0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f,
+    a: 0,
+    b: 7
+  }
+}.freeze
+
+# Accept/reject an affine EC public point (x, y) on a named prime-order curve;
+# mirrors oracle.ec_key_verdict. Ruby's % is non-negative for a positive modulus.
+def ec_key_verdict(curve, x, y)
+  c = EC_CURVES[curve]
+  p = c[:p]
+  a = c[:a]
+  b = c[:b]
+  return [false, 'coordinate_out_of_range'] if x < 0 || x >= p || y < 0 || y >= p
+  return [false, 'not_on_curve'] if (y * y - (x**3 + a * x + b)) % p != 0
+
+  [true, 'ok']
+end
+
+# ---------------------------------------------------------------------------
 # runner
 # ---------------------------------------------------------------------------
 
@@ -234,7 +295,27 @@ def main
     end
   end
 
-  total = (corpus['primality'] || []).length + (corpus['rsa_modulus_hygiene'] || []).length
+  batch = corpus['batch_common_factor'] || []
+  unless batch.empty?
+    moduli = batch.map { |c| c['n'].to_i }
+    verdicts = batch_common_factor_verdicts(moduli)
+    batch.each_with_index do |c, i|
+      got = verdicts[i]
+      if got != c['shares_factor']
+        failures << "batch_common_factor[#{i}] #{c['note']}: got shares=#{got} want #{c['shares_factor']}"
+      end
+    end
+  end
+
+  (corpus['ec_key_hygiene'] || []).each_with_index do |c, i|
+    valid, reason = ec_key_verdict(c['curve'], c['x'].to_i, c['y'].to_i)
+    if valid != c['expect_valid'] || reason != c['reason']
+      failures << "ec_key_hygiene[#{i}] #{c['note']}: got (#{valid},#{reason}) want (#{c['expect_valid']},#{c['reason']})"
+    end
+  end
+
+  total = %w[primality rsa_modulus_hygiene batch_common_factor ec_key_hygiene]
+          .sum { |s| (corpus[s] || []).length }
   unless failures.empty?
     puts "FAIL: #{failures.length}/#{total} cases diverged"
     failures.first(20).each { |f| puts "  - #{f}" }

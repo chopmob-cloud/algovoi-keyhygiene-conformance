@@ -225,6 +225,60 @@ def rsaVerdict(n: BigInt, e: Int): (Boolean, String) =
   else (true, "ok")
 
 // ---------------------------------------------------------------------------
+// batch common-factor (Mining-your-Ps-and-Qs): shared prime across a key set
+// ---------------------------------------------------------------------------
+
+// For a SET of moduli, a key's verdict is True iff it shares a nontrivial prime
+// with another key in the set: some j != i with 1 < gcd(n_i, n_j) < n_i.
+def batchCommonFactorVerdicts(moduli: Array[BigInt]): Array[Boolean] =
+  val out = Array.fill(moduli.length)(false)
+  var i = 0
+  while i < moduli.length do
+    val ni = moduli(i)
+    var j = 0
+    var shared = false
+    while j < moduli.length && !shared do
+      if j != i then
+        val g = ni.gcd(moduli(j))
+        if g > 1 && g < ni then shared = true
+      j += 1
+    out(i) = shared
+    i += 1
+  out
+
+// ---------------------------------------------------------------------------
+// EC public-key hygiene: on-curve validation for prime-order NIST/SEC curves.
+// (p, a, b) EXACTLY from oracle.EC_CURVES; hex copied verbatim.
+// ---------------------------------------------------------------------------
+
+// curve -> (p, a, b)
+val EC_CURVES: Map[String, (BigInt, BigInt, BigInt)] = Map(
+  "p256" -> (
+    BigInt("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 16),
+    BigInt("ffffffff00000001000000000000000000000000fffffffffffffffffffffffc", 16),
+    BigInt("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b", 16)
+  ),
+  "p384" -> (
+    BigInt("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff", 16),
+    BigInt("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc", 16),
+    BigInt("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef", 16)
+  ),
+  "secp256k1" -> (
+    BigInt("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16),
+    BigInt("0", 16),
+    BigInt("7", 16)
+  )
+)
+
+// Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+// BigInt.mod is non-negative, matching Python's % on a positive modulus.
+def ecVerdict(curve: String, x: BigInt, y: BigInt): (Boolean, String) =
+  val (p, a, b) = EC_CURVES(curve)
+  if x < 0 || x >= p || y < 0 || y >= p then (false, "coordinate_out_of_range")
+  else if (y * y - (x.pow(3) + a * x + b)).mod(p) != 0 then (false, "not_on_curve")
+  else (true, "ok")
+
+// ---------------------------------------------------------------------------
 // runner
 // ---------------------------------------------------------------------------
 
@@ -260,7 +314,28 @@ def rsaVerdict(n: BigInt, e: Int): (Boolean, String) =
     if accept != wantAccept || reason != wantReason then
       failures += s"rsa[$i] ${c.optString("note")}: got ($accept,$reason) want ($wantAccept,$wantReason)"
 
-  val total = primLen + rsaLen
+  val batch = root.optJSONArray("batch_common_factor")
+  val batchLen = if batch == null then 0 else batch.length
+  val batchModuli = Array.tabulate(batchLen)(i => BigInt(batch.getJSONObject(i).getString("n")))
+  val batchVerdicts = batchCommonFactorVerdicts(batchModuli)
+  for i <- 0 until batchLen do
+    val c = batch.getJSONObject(i)
+    val got = batchVerdicts(i)
+    val want = c.getBoolean("shares_factor")
+    if got != want then
+      failures += s"batch_common_factor[$i] ${c.optString("note")}: got shares=$got want $want"
+
+  val ec = root.optJSONArray("ec_key_hygiene")
+  val ecLen = if ec == null then 0 else ec.length
+  for i <- 0 until ecLen do
+    val c = ec.getJSONObject(i)
+    val (valid, reason) = ecVerdict(c.getString("curve"), BigInt(c.getString("x")), BigInt(c.getString("y")))
+    val wantValid = c.getBoolean("expect_valid")
+    val wantReason = c.getString("reason")
+    if valid != wantValid || reason != wantReason then
+      failures += s"ec_key_hygiene[$i] ${c.optString("note")}: got ($valid,$reason) want ($wantValid,$wantReason)"
+
+  val total = primLen + rsaLen + batchLen + ecLen
   if failures.nonEmpty then
     println(s"FAIL: ${failures.length}/$total cases diverged")
     failures.take(20).foreach(f => println("  - " + f))

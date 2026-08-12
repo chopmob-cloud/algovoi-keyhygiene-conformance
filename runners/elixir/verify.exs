@@ -393,6 +393,61 @@ defmodule KH do
       true -> {true, "ok"}
     end
   end
+
+  # --- batch common-factor (Mining-your-Ps-and-Qs) ------------------------
+
+  # Per-key verdict for a SET of RSA moduli: True iff the key shares a nontrivial
+  # prime with another key in the set (a common GCD strictly between 1 and n_i).
+  # Such a key is trivially factorable by anyone holding the set. O(n^2) over the
+  # (small) set; Integer.gcd/2 is native arbitrary precision.
+  def batch_common_factor_verdicts(moduli) do
+    indexed = Enum.with_index(moduli)
+
+    Enum.map(indexed, fn {ni, i} ->
+      Enum.any?(indexed, fn {nj, j} ->
+        if i == j do
+          false
+        else
+          g = Integer.gcd(ni, nj)
+          1 < g and g < ni
+        end
+      end)
+    end)
+  end
+
+  # --- EC public-key hygiene ----------------------------------------------
+
+  # Curve parameters {p, a, b}, copied byte-for-byte from oracle.EC_CURVES.
+  # P-256 and P-384 use a = p - 3; secp256k1 uses a = 0, b = 7. All three are
+  # prime-order (cofactor 1), so in-range + on-curve is sufficient.
+  defp ec_curve("p256"),
+    do:
+      {0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff,
+       0xffffffff00000001000000000000000000000000fffffffffffffffffffffffc,
+       0x5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b}
+
+  defp ec_curve("p384"),
+    do:
+      {0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff,
+       0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc,
+       0xb3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef}
+
+  defp ec_curve("secp256k1"),
+    do: {0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f, 0, 7}
+
+  # Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+  # Reject out-of-range coordinates, then off-curve points. pmod/2 normalises the
+  # (possibly negative) Elixir remainder to Python `%` semantics before the zero
+  # test.
+  def ec_verdict(curve, x, y) do
+    {p, a, b} = ec_curve(curve)
+
+    cond do
+      x < 0 or x >= p or y < 0 or y >= p -> {false, "coordinate_out_of_range"}
+      pmod(y * y - (x * x * x + a * x + b), p) != 0 -> {false, "not_on_curve"}
+      true -> {true, "ok"}
+    end
+  end
 end
 
 # ---------------------------------------------------------------------------
@@ -411,6 +466,8 @@ corpus =
 
 primality = Map.get(corpus, "primality", [])
 rsa = Map.get(corpus, "rsa_modulus_hygiene", [])
+batch = Map.get(corpus, "batch_common_factor", [])
+ec = Map.get(corpus, "ec_key_hygiene", [])
 
 prime_failures =
   primality
@@ -445,8 +502,53 @@ rsa_failures =
     end
   end)
 
-failures = prime_failures ++ rsa_failures
-total = length(primality) + length(rsa)
+# batch_common_factor: read the whole set of moduli, then compare each key's
+# shared-factor verdict to its frozen expectation.
+batch_failures =
+  case batch do
+    [] ->
+      []
+
+    _ ->
+      moduli = Enum.map(batch, fn c -> String.to_integer(Map.fetch!(c, "n")) end)
+      verdicts = KH.batch_common_factor_verdicts(moduli)
+
+      batch
+      |> Enum.zip(verdicts)
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {{c, got}, i} ->
+        want = Map.fetch!(c, "shares_factor")
+
+        if got == want do
+          []
+        else
+          note = Map.get(c, "note", "")
+          ["batch_common_factor[#{i}] #{note}: got shares=#{got} want #{want}"]
+        end
+      end)
+  end
+
+ec_failures =
+  ec
+  |> Enum.with_index()
+  |> Enum.flat_map(fn {c, i} ->
+    curve = Map.fetch!(c, "curve")
+    x = String.to_integer(Map.fetch!(c, "x"))
+    y = String.to_integer(Map.fetch!(c, "y"))
+    {valid, reason} = KH.ec_verdict(curve, x, y)
+    want_valid = Map.fetch!(c, "expect_valid")
+    want_reason = Map.fetch!(c, "reason")
+
+    if valid == want_valid and reason == want_reason do
+      []
+    else
+      note = Map.get(c, "note", "")
+      ["ec_key_hygiene[#{i}] #{note}: got (#{valid},#{reason}) want (#{want_valid},#{want_reason})"]
+    end
+  end)
+
+failures = prime_failures ++ rsa_failures ++ batch_failures ++ ec_failures
+total = length(primality) + length(rsa) + length(batch) + length(ec)
 matched = total - length(failures)
 
 Enum.each(failures, fn f -> IO.puts("  - " <> f) end)

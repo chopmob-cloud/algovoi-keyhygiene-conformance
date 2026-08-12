@@ -2,9 +2,11 @@
 //
 // Independent port of tools/oracle.py using java.math.BigInteger: Baillie-PSW
 // primality (strong Miller-Rabin base 2 + strong Lucas, implemented here — NOT
-// BigInteger.isProbablePrime, which uses random bases) and the RSA hygiene
-// detectors (perfect power, small factor, close primes). Reads the frozen
-// corpus and reproduces every verdict byte-for-byte; exits 0 iff all match.
+// BigInteger.isProbablePrime, which uses random bases), the RSA hygiene
+// detectors (perfect power, small factor, close primes), batch common-factor
+// (shared-prime GCD across a key set), and EC on-curve hygiene (P-256, P-384,
+// secp256k1). Reads the frozen corpus and reproduces every verdict byte-for-byte;
+// exits 0 iff all match.
 //
 // Compile/run:
 //   kotlinc Verify.kt -cp json.jar -include-runtime -d v.jar \
@@ -223,6 +225,70 @@ private fun rsaVerdict(n: BigInteger, e: Int): Pair<Boolean, String> {
 }
 
 // ---------------------------------------------------------------------------
+// batch common-factor (Mining-your-Ps-and-Qs): a shared prime across a key set
+// ---------------------------------------------------------------------------
+
+// For a SET of RSA moduli, per-key verdict = shares a prime with another key in
+// the set (a nontrivial common GCD). Mirrors oracle.batch_common_factor_verdicts:
+// key i shares iff there exists j != i with 1 < gcd(n_i, n_j) < n_i.
+private fun batchCommonFactorVerdicts(moduli: List<BigInteger>): List<Boolean> {
+    val out = ArrayList<Boolean>(moduli.size)
+    for (i in moduli.indices) {
+        val ni = moduli[i]
+        var shared = false
+        for (j in moduli.indices) {
+            if (i == j) continue
+            val g = ni.gcd(moduli[j])
+            if (g > ONE && g < ni) {
+                shared = true
+                break
+            }
+        }
+        out.add(shared)
+    }
+    return out
+}
+
+// ---------------------------------------------------------------------------
+// EC public-key hygiene: on-curve validation for the prime-order NIST/SEC curves
+// (P-256, P-384, secp256k1 all have cofactor 1, so on-curve + in-range is
+// sufficient). Curve (p, a, b) parameters copied byte-for-byte from
+// oracle.EC_CURVES; a = p - 3 for the NIST curves, a = 0 / b = 7 for secp256k1.
+// ---------------------------------------------------------------------------
+
+private class Curve(val p: BigInteger, val a: BigInteger, val b: BigInteger)
+
+private val EC_CURVES: Map<String, Curve> = mapOf(
+    "p256" to Curve(
+        BigInteger("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 16),
+        BigInteger("ffffffff00000001000000000000000000000000fffffffffffffffffffffffc", 16),
+        BigInteger("5ac635d8aa3a93e7b3ebbd55769886bc651d06b0cc53b0f63bce3c3e27d2604b", 16)
+    ),
+    "p384" to Curve(
+        BigInteger("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000ffffffff", 16),
+        BigInteger("fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffeffffffff0000000000000000fffffffc", 16),
+        BigInteger("b3312fa7e23ee7e4988e056be3f82d19181d9c6efe8141120314088f5013875ac656398d8a2ed19d2a85c8edd3ec2aef", 16)
+    ),
+    "secp256k1" to Curve(
+        BigInteger("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f", 16),
+        ZERO,
+        BigInteger.valueOf(7)
+    )
+)
+
+// Accept/reject an affine EC public point (x, y) on a named prime-order curve.
+// Mirrors oracle.ec_key_verdict: reject out-of-range coordinates, then off-curve
+// points; else accept. BigInteger.mod is non-negative, matching Python's %.
+private fun ecKeyVerdict(curve: String, x: BigInteger, y: BigInteger): Pair<Boolean, String> {
+    val c = EC_CURVES.getValue(curve)
+    val p = c.p
+    if (x < ZERO || x >= p || y < ZERO || y >= p) return Pair(false, "coordinate_out_of_range")
+    val rhs = x.pow(3).add(c.a.multiply(x)).add(c.b)
+    if (y.multiply(y).subtract(rhs).mod(p) != ZERO) return Pair(false, "not_on_curve")
+    return Pair(true, "ok")
+}
+
+// ---------------------------------------------------------------------------
 
 fun main(args: Array<String>) {
     val path = if (args.isNotEmpty()) args[0] else System.getenv("ALGOVOI_KEYHYGIENE")
@@ -262,7 +328,45 @@ fun main(args: Array<String>) {
         }
     }
 
-    val total = primalityCount + rsaCount
+    val batch = root.optJSONArray("batch_common_factor")
+    val batchCount = batch?.length() ?: 0
+    if (batch != null) {
+        val moduli = ArrayList<BigInteger>(batch.length())
+        for (i in 0 until batch.length()) {
+            moduli.add(BigInteger(batch.getJSONObject(i).getString("n")))
+        }
+        val verdicts = batchCommonFactorVerdicts(moduli)
+        for (i in 0 until batch.length()) {
+            val c = batch.getJSONObject(i)
+            val note = c.optString("note")
+            val got = verdicts[i]
+            val want = c.getBoolean("shares_factor")
+            if (got != want) {
+                failures.add("batch_common_factor[$i] $note: got shares=$got want $want")
+            }
+        }
+    }
+
+    val ec = root.optJSONArray("ec_key_hygiene")
+    val ecCount = ec?.length() ?: 0
+    if (ec != null) {
+        for (i in 0 until ec.length()) {
+            val c = ec.getJSONObject(i)
+            val note = c.optString("note")
+            val (valid, reason) = ecKeyVerdict(
+                c.getString("curve"),
+                BigInteger(c.getString("x")),
+                BigInteger(c.getString("y"))
+            )
+            val wantValid = c.getBoolean("expect_valid")
+            val wantReason = c.getString("reason")
+            if (valid != wantValid || reason != wantReason) {
+                failures.add("ec_key_hygiene[$i] $note: got ($valid,$reason) want ($wantValid,$wantReason)")
+            }
+        }
+    }
+
+    val total = primalityCount + rsaCount + batchCount + ecCount
     if (failures.isNotEmpty()) {
         println("FAIL: ${failures.size}/$total cases diverged")
         for (f in failures.take(20)) println("  - $f")
