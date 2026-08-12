@@ -14,7 +14,8 @@ set -u
 
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 REPO="${REPO:-$HERE}"
-CORPUS="corpus/keyhygiene_v0/keyhygiene_v0.json"
+# repo-relative corpus path (mounted at /work); override to run a mutated corpus.
+CORPUS="${CORPUS:-corpus/keyhygiene_v0/keyhygiene_v0.json}"
 CORPUS_IN="/work/$CORPUS"
 RESULTS="$HERE/kaf/cells.results.json"
 

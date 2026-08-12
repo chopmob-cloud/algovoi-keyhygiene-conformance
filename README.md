@@ -66,8 +66,35 @@ this shows the primality section discriminates.
   factors, primes by deterministic Miller-Rabin sound in range, RSA reasons by an
   independent structural check, so a systematic error shared by the generator and
   a runner cannot pass as consensus.
-- **N-way consensus** (planned): twelve independent implementations, each using
-  its own big-integer stack, must reproduce every verdict.
+- **12-way consensus**: twelve independent implementations, each using its own
+  big-integer stack, reproduce every verdict byte-for-byte
+  (`tools/run_consensus.sh --require 12`, fail-closed).
+- **Hermetic cells**: each runner is re-run against the signed corpus inside a
+  pinned Docker image (`kaf/run_cells.sh`), so the verdict holds in a clean,
+  independent runtime.
+- **Sealed receipt**: `kaf/seal_receipt.py` binds agreement + cells + corpus
+  into one EdDSA-signed, re-verifiable receipt (`kaf/kaf_verify.py`); the seal
+  secret is held off-repo, only the public JWK ships.
+- **Mutation-proven teeth**: flipping any expected verdict makes every runner
+  (and every cell) go red, so the runners genuinely compute rather than echo.
+
+## Cross-implementation validation
+
+Every case is reproduced byte-for-byte by twelve independent implementations,
+each with its own big-integer stack and its own from-scratch Baillie-PSW (never a
+stdlib primality shortcut):
+
+| Language | Big-int stack | Language | Big-int stack |
+|---|---|---|---|
+| Python | `int` | Java | `BigInteger` |
+| TypeScript | `BigInt` | Kotlin | `BigInteger` |
+| Go | `math/big` | Scala | `BigInt` |
+| Rust | `num-bigint` | .NET | `BigInteger` |
+| C | GMP | Ruby | `Integer` |
+| Elixir | native | PHP | GMP |
+
+Latest sealed run: **32 cases, full 12-way consensus, 12/12 hermetic cells PASS**
+(`kaf/receipts/keyhygiene_v0.seq1.receipt.json`).
 
 ## Security scope (defensive only)
 
@@ -86,7 +113,14 @@ ALGOVOI_LOCAL_SRC=/path/to/algovoi-corpus-cm/src \
   python tools/sign_keyhygiene_v0.py                   # sign the head (off-repo secret)
 ALGOVOI_LOCAL_SRC=/path/to/algovoi-corpus-cm/src \
   python tools/check_kat.py                            # fail-closed KAT gate
+bash tools/run_consensus.sh --require 12               # twelve-way byte-for-byte consensus
+bash kaf/run_cells.sh                                  # hermetic per-language Docker cells
+python kaf/kaf_verify.py kaf/receipts/keyhygiene_v0.seq1.receipt.json  # verify the sealed receipt
 ```
+
+Individual runners live under `runners/<lang>/` and each exits 0 iff every case
+matches. Point `ALGOVOI_KEYHYGIENE` at a corpus to run any runner or gate
+against it.
 
 ## Licence
 
