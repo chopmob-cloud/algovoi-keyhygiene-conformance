@@ -4,14 +4,14 @@
     "layer": "L0",
     "suite": "keyhygiene_v0",
     "sealed_at": "2026-08-12T00:00:00Z",
-    "seq": 2,
+    "seq": 3,
     "corpus": {
       "id": "keyhygiene_v0",
-      "file_sha256": "sha256:aa684d06ae3366314a843a646a8b0c08e3ae181eb08f6eee16755ff62decd039",
-      "manifest_file_sha256": "sha256:aa684d06ae3366314a843a646a8b0c08e3ae181eb08f6eee16755ff62decd039",
-      "manifest_corpus_digest": "sha256:e940868925f07e1fd217d92fe1ecfd7be3da0c9a14ca79b75157dcab0a77e171",
+      "file_sha256": "sha256:88942bd3553a791def9b3f2efaa1ebf458148fb960654a2dc31de69a17e1bb5f",
+      "manifest_file_sha256": "sha256:88942bd3553a791def9b3f2efaa1ebf458148fb960654a2dc31de69a17e1bb5f",
+      "manifest_corpus_digest": "sha256:eb9e63b5cf155d54dcac116d91d599aa926b81f7548f683354fafa523e8492b9",
       "signed_head": true,
-      "total_cases": 53
+      "total_cases": 59
     },
     "axes": {
       "agreement": {
@@ -31,7 +31,7 @@
           "typescript"
         ],
         "result": "full 12-way byte-for-byte consensus",
-        "cases": 53
+        "cases": 59
       },
       "kat": {
         "corpus_integrity": "matches signed manifest head",
@@ -137,6 +137,6 @@
       "x": "oJt10SibFKCx9vgAaR--iSdPg4ILTIj8p--2mUOHjJg",
       "kid": "309f5d8dcef5410a4dff781feeabfa5e"
     },
-    "sig_b64": "gLgLxjUmLTs4qE26wEovOeetcpM/VGiiGh0iFcVXfLfoA/a4yWTGPpnqU2SWgaSYm2jSqBAA8t3oLsLP2T8+AA=="
+    "sig_b64": "0BTg7DclDsP/ivB4YWwsQZgmEn7g9pGNLLdnWvCZqEyZ2kMySvhIdvltQ5+Ock+8Fl+mUpPTh1RMXYMcWtbcDA=="
   }
 }

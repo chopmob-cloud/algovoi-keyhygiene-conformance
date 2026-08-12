@@ -311,6 +311,38 @@ internal static class Program
     }
 
     // ---------------------------------------------------------------------
+    // ROCA (CVE-2017-15361): Infineon RSALib fingerprint. A ROCA modulus is
+    // congruent to a power of the generator (65537) modulo every prime factor of
+    // M, so n mod pf lands in the multiplicative subgroup {g^j mod pf} for EVERY
+    // pf in the policy prime list. Mirrors oracle.roca_fingerprint_verdict.
+    // ---------------------------------------------------------------------
+
+    // The cyclic subgroup {g^j mod pf} (all powers of the generator).
+    private static HashSet<long> RocaSubgroup(long g, long pf)
+    {
+        var s = new HashSet<long>();
+        long x = 1 % pf;
+        while (!s.Contains(x))
+        {
+            s.Add(x);
+            x = (x * g) % pf;
+        }
+        return s;
+    }
+
+    // True iff n carries the ROCA fingerprint: n mod pf is a power of g for
+    // EVERY pf in the prime list.
+    private static bool RocaFingerprintVerdict(BigInteger n, long g, long[] primes)
+    {
+        foreach (long pf in primes)
+        {
+            long residue = (long)(n % pf);
+            if (!RocaSubgroup(g, pf).Contains(residue)) return false;
+        }
+        return true;
+    }
+
+    // ---------------------------------------------------------------------
     // driver
     // ---------------------------------------------------------------------
 
@@ -403,11 +435,30 @@ internal static class Program
             }
         }
 
+        if (root.TryGetProperty("roca_fingerprint", out JsonElement roca))
+        {
+            long g = root.GetProperty("policy").GetProperty("roca_generator").GetInt64();
+            long[] primes = root.GetProperty("policy").GetProperty("roca_primes")
+                .EnumerateArray().Select(v => v.GetInt64()).ToArray();
+            int i = 0;
+            foreach (JsonElement c in roca.EnumerateArray())
+            {
+                string note = c.TryGetProperty("note", out var nt) ? (nt.GetString() ?? "") : "";
+                BigInteger n = BigInteger.Parse(c.GetProperty("n").GetString()!);
+                bool expect = c.GetProperty("roca_vulnerable").GetBoolean();
+                bool got = RocaFingerprintVerdict(n, g, primes);
+                if (got != expect)
+                    failures.Add($"roca_fingerprint[{i}] {note}: got roca={got} want {expect}");
+                i++;
+            }
+        }
+
         int total = 0;
         if (root.TryGetProperty("primality", out var p2)) total += p2.GetArrayLength();
         if (root.TryGetProperty("rsa_modulus_hygiene", out var r2)) total += r2.GetArrayLength();
         if (root.TryGetProperty("batch_common_factor", out var b2)) total += b2.GetArrayLength();
         if (root.TryGetProperty("ec_key_hygiene", out var e2)) total += e2.GetArrayLength();
+        if (root.TryGetProperty("roca_fingerprint", out var rc2)) total += rc2.GetArrayLength();
 
         if (failures.Count > 0)
         {
