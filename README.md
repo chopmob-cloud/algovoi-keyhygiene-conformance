@@ -1,6 +1,6 @@
 # algovoi-keyhygiene-conformance
 
-[![12-way consensus](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml/badge.svg)](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
+[![12-way consensus](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml/badge.svg)](https://github.com/chopmob-cloud/algovoi-keyhygiene-conformance/actions/workflows/consensus.yml) [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE) [![algovoi-jcs-conformance-vectors](https://img.shields.io/badge/algovoi--jcs--conformance--vectors-8A2BE2)](https://github.com/chopmob-cloud/algovoi-jcs-conformance-vectors) [![algovoi-rfc9421-conformance](https://img.shields.io/badge/algovoi--rfc9421--conformance-8A2BE2)](https://github.com/chopmob-cloud/algovoi-rfc9421-conformance)
 
 A signed, cross-language conformance battery for **RSA/EC public-key hygiene and
 primality soundness**. Given a candidate integer or a public key, every
