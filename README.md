@@ -82,7 +82,7 @@ this shows the primality section discriminates.
 
 - **Signed corpus.** The corpus head (per-section digests + file hash) is
   canonicalised (RFC 8785 JCS) and EdDSA-signed via
-  [algovoi-corpus-cm](https://github.com/chopmob-cloud/algovoi-corpus-cm); only
+  `algovoi-corpus-cm` (private); only
   the public JWK ships, the signing seed is a genuine secret held off-repo.
 - **KAT gate** (`tools/check_kat.py`): verifies the head signature, and
   independently re-derives every verdict, composites by re-multiplying their
